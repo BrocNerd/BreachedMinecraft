@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "breached",
+  "version": "${version}",
+  "name": "Breached",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/breached/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-datagen": [
+      "nrd.breached.client.BreachedDataGenerator"
+    ],
+    "client": [
+      "nrd.breached.client.BreachedClient"
+    ],
+    "main": [
+      "nrd.breached.Breached"
+    ]
+  },
+  "mixins": [
+    "breached.mixins.json",
+    {
+      "config": "breached.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}

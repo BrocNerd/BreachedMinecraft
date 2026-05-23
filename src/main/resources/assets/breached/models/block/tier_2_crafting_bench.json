@@ -1,0 +1,12 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "particle": "breached:block/diamond_crafting_table_side",
+    "down": "minecraft:block/diamond_block",
+    "up": "breached:block/diamond_crafting_table_top",
+    "north": "breached:block/diamond_crafting_table_front",
+    "east": "breached:block/diamond_crafting_table_side",
+    "south": "breached:block/diamond_crafting_table_front",
+    "west": "breached:block/diamond_crafting_table_side"
+  }
+}
