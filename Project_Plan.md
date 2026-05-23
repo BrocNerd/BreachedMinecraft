@@ -32,11 +32,51 @@ Tier 3 - Netherite. Updated recipe to 1 beacon 5 diamond blocks and 1 netherite 
 
 Landlock Block to claim chunks:
 
-Craftable block that would allow you (and your team) to “claim” a chunk and the surrounding chunks (essentially a 3x3 chunk area or 48x48 block area). Only you (and team members) are able to interact with or place any blocks within this chunk (but not containers, anyone can still access them). Can be broken to destroy claim. Landlock claims may not overlap, and Landlock blocks must be at least 64 blocks apart. No block damage from explosives or fire in claimed chunks. Give feedback when area is claimed, and allow for an ability to see claimed chunks. 3 Landlocks’s Max per team, allow for ability to see current Landlock amount. Landlock can be instantly replaced after break - this means teams must be prepared with a Landlock and confirmation of kill on every active team member to completely take control of a base.
+Phase 6 — Breachers
 
-Breach Tool (probably Pickaxe):
+Goal:
+Add special raid tools called Breachers that allow unauthorized players to break blocks inside Landlock claims.
 
-Pickaxe with minimal durability, but ability to break blocks within claimed chunks. Locked behind Tiered crafting tables. Hard crafting recipe. Upgrading Breach tool for every new tier crafting table, with increasingly hard crafting recipes. Can’t destroy tiered crafting tables.
+Core Rules:
+- Breachers are not normal pickaxes.
+- Breachers can break any block anywhere, including outside claims.
+- Breachers break all blocks very slowly, roughly 15 seconds per block.
+- Breachers are the only tools unauthorized players can use to break blocks inside enemy Landlock claims.
+- Breachers can break all claimed blocks, including Landlock blocks.
+- Breachers lose 1 durability every time they successfully break any block.
+- Breachers lose durability whether the block is claimed or unclaimed.
+- Breachers lose durability whether the player is authorized or unauthorized.
+- If an unauthorized player tries to break a claimed block without a Breacher, the break is denied by Landlock protection.
+- Normal tools still work normally outside claims.
+- Normal tools still work normally inside claims where the player is authorized.
+- Breachers should not be enchantable or repairable unless added intentionally later.
+
+Tiers:
+
+Iron Breacher
+- Recipe: 2 iron blocks + 1 diamond block
+- Durability: 1 block break
+- Purpose: Extremely expensive emergency/surgical breach tool.
+
+Diamond Breacher
+- Recipe: 3 diamond blocks
+- Durability: 5 block breaks
+- Purpose: Mid-tier raid tool for small breaches or weak bases.
+
+Netherite Breacher
+- Recipe: 1 netherite block + 4 diamond blocks
+- Durability: 20 block breaks
+- Purpose: High-tier raid tool for serious raids.
+
+Balance Notes:
+- Because Breachers can be crafted in multiples, durability is intentionally low and recipes are intentionally expensive.
+- Using a Breacher outside a claim is allowed, but wasteful.
+- Every block broken with a Breacher consumes one use, making each breach decision costly.
+- A 15-second break time means:
+    - Iron Breacher = 15 seconds of breach time
+    - Diamond Breacher = 75 seconds of breach time
+    - Netherite Breacher = 5 minutes of breach time
+
 
 Teams:
 
@@ -104,7 +144,7 @@ Goal: Add Landlock block that claim land, protect blocks, manage ownership, and 
 Notes:
 
 
-Phase 6 — Breach Tool System
+Phase 6 — Breacher Tool System
 Goal: Add breach tools that allow raiding through claimed blocks while normal tools cannot.
 Notes:
 

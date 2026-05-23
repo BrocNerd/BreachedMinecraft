@@ -63,6 +63,8 @@ public class LandlockBlock extends BlockWithEntity {
         UUID ownerUuid = landlock.getOwnerUuid();
         if (ownerUuid == null) {
             player.sendMessage(Text.literal("This Landlock has no owner."), false);
+        } else if (player.isSneaking()) {
+            handleSneakUse(player, landlock, ownerUuid);
         } else if (ownerUuid.equals(player.getUuid())) {
             player.sendMessage(Text.literal("You own this Landlock."), false);
         } else if (landlock.isAuthorized(player.getUuid())) {
@@ -76,5 +78,15 @@ public class LandlockBlock extends BlockWithEntity {
 
         player.sendMessage(Text.literal("Claim radius: " + LandlockClaimManager.CLAIM_RADIUS + " blocks."), false);
         return ActionResult.SUCCESS;
+    }
+
+    private static void handleSneakUse(PlayerEntity player, LandlockBlockEntity landlock, UUID ownerUuid) {
+        if (ownerUuid.equals(player.getUuid())) {
+            player.sendMessage(Text.literal("You own this Landlock. Break it to remove it from your authorization count."), false);
+        } else if (landlock.removeAuthorizedPlayer(player.getUuid())) {
+            player.sendMessage(Text.literal("You are no longer authorized on this Landlock."), false);
+        } else {
+            player.sendMessage(Text.literal("You are not authorized on this Landlock."), false);
+        }
     }
 }

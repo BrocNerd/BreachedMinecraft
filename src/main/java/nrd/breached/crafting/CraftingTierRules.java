@@ -19,6 +19,7 @@ public final class CraftingTierRules {
                 Items.IRON_SWORD, Items.IRON_SHOVEL, Items.IRON_PICKAXE, Items.IRON_AXE, Items.IRON_HOE,
                 Items.IRON_HELMET, Items.IRON_CHESTPLATE, Items.IRON_LEGGINGS, Items.IRON_BOOTS,
                 Items.IRON_SPEAR, Items.GOLDEN_SPEAR,
+                Breached.IRON_BREACHER,
                 Breached.TIER_2_CRAFTING_BENCH.asItem()
         );
 
@@ -28,6 +29,7 @@ public final class CraftingTierRules {
                 Items.DIAMOND_SPEAR,
                 Items.ENCHANTING_TABLE,
                 Items.BREWING_STAND,
+                Breached.DIAMOND_BREACHER,
                 Breached.TIER_3_CRAFTING_BENCH.asItem()
         );
 
@@ -36,7 +38,8 @@ public final class CraftingTierRules {
                 Items.CHISELED_BOOKSHELF,
                 Items.NETHERITE_SWORD, Items.NETHERITE_SHOVEL, Items.NETHERITE_PICKAXE, Items.NETHERITE_AXE, Items.NETHERITE_HOE,
                 Items.NETHERITE_HELMET, Items.NETHERITE_CHESTPLATE, Items.NETHERITE_LEGGINGS, Items.NETHERITE_BOOTS,
-                Items.NETHERITE_SPEAR
+                Items.NETHERITE_SPEAR,
+                Breached.NETHERITE_BREACHER
         );
     }
 

@@ -28,6 +28,7 @@ import nrd.breached.block.IronCraftingTableBlock;
 import nrd.breached.block.LandlockBlock;
 import nrd.breached.block.LandlockBlockEntity;
 import nrd.breached.block.NetheriteCraftingTableBlock;
+import nrd.breached.item.BreacherItem;
 import nrd.breached.landlock.LandlockClaimManager;
 import nrd.breached.team.TeamCommands;
 
@@ -66,6 +67,36 @@ public class Breached implements ModInitializer {
             FabricBlockEntityTypeBuilder.create(LandlockBlockEntity::new, LANDLOCK_BLOCK).build()
     );
 
+    public static final Item IRON_BREACHER = registerItem(
+            "iron_breacher",
+            BreacherItem::new,
+            new Item.Settings().maxDamage(1)
+    );
+
+    public static final Item DIAMOND_BREACHER = registerItem(
+            "diamond_breacher",
+            BreacherItem::new,
+            new Item.Settings().maxDamage(5)
+    );
+
+    public static final Item NETHERITE_BREACHER = registerItem(
+            "netherite_breacher",
+            BreacherItem::new,
+            new Item.Settings().maxDamage(20).fireproof()
+    );
+
+    public static final Item PROBE = registerItem(
+            "probe",
+            Item::new,
+            new Item.Settings()
+    );
+
+    private static Item registerItem(String name, Function<Item.Settings, Item> itemFactory, Item.Settings settings) {
+        Identifier id = Identifier.of(MOD_ID, name);
+        RegistryKey<Item> itemKey = RegistryKey.of(RegistryKeys.ITEM, id);
+        return Registry.register(Registries.ITEM, id, itemFactory.apply(settings.registryKey(itemKey)));
+    }
+
     private static Block registerBlock(String name, Function<AbstractBlock.Settings, Block> blockFactory, AbstractBlock.Settings settings) {
         Identifier id = Identifier.of(MOD_ID, name);
         RegistryKey<Block> blockKey = RegistryKey.of(RegistryKeys.BLOCK, id);
@@ -99,17 +130,31 @@ public class Breached implements ModInitializer {
             entries.add(TIER_3_CRAFTING_BENCH);
             entries.add(LANDLOCK_BLOCK);
         });
+
+        ItemGroupEvents.modifyEntriesEvent(ItemGroups.TOOLS).register(entries -> {
+            entries.add(IRON_BREACHER);
+            entries.add(DIAMOND_BREACHER);
+            entries.add(NETHERITE_BREACHER);
+            entries.add(PROBE);
+        });
     }
 
     private static void registerLandlockProtectionEvents() {
         PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) -> {
-            if (world.isClient() || LandlockClaimManager.canPlayerModify(world, player, pos)) {
+            if (world.isClient() || LandlockClaimManager.canPlayerModify(world, player, pos) || canBreachBlock(player.getMainHandStack(), state)) {
                 return true;
             }
 
             player.sendMessage(Text.literal("This area is protected by a Landlock."), false);
             return false;
         });
+    }
+
+    private static boolean canBreachBlock(net.minecraft.item.ItemStack stack, net.minecraft.block.BlockState state) {
+        return stack.getItem() instanceof BreacherItem
+                && !stack.isEmpty()
+                && !stack.willBreakNextUse()
+                && !BreacherItem.isBlockedBlock(state);
     }
 
     private static void registerLandlockPlacementProtectionEvents() {
@@ -169,6 +214,14 @@ public class Breached implements ModInitializer {
     private static void registerLandlockDebugEvents() {
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
             if (world.isClient() || !player.isSneaking()) {
+                return ActionResult.PASS;
+            }
+
+            if (!player.getMainHandStack().isOf(PROBE) && !player.getOffHandStack().isOf(PROBE)) {
+                return ActionResult.PASS;
+            }
+
+            if (world.getBlockState(hitResult.getBlockPos()).isOf(LANDLOCK_BLOCK)) {
                 return ActionResult.PASS;
             }
 

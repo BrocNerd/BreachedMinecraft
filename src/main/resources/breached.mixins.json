@@ -4,6 +4,7 @@
   "package": "nrd.breached.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "BlockBreakingDeltaMixin",
     "CraftingScreenHandlerMixin",
     "ItemStackMixin"
   ],

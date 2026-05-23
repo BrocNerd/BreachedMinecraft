@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "D": "minecraft:diamond_block",
+    "N": "minecraft:netherite_block"
+  },
+  "pattern": [
+    "DND",
+    " D ",
+    " D "
+  ],
+  "result": {
+    "count": 1,
+    "id": "breached:netherite_breacher"
+  }
+}

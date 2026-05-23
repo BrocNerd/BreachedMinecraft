@@ -42,6 +42,19 @@ public class LandlockBlockEntity extends BlockEntity {
         markDirty();
     }
 
+    public boolean removeAuthorizedPlayer(UUID playerUuid) {
+        if (playerUuid.equals(ownerUuid)) {
+            return false;
+        }
+
+        boolean removed = authorizedPlayers.remove(playerUuid);
+        if (removed) {
+            markDirty();
+        }
+
+        return removed;
+    }
+
     public Set<UUID> getAuthorizedPlayers() {
         return authorizedPlayers;
     }

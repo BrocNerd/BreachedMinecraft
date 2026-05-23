@@ -6,5 +6,9 @@
   "block.breached.tier_3_crafting_bench": "Netherite Crafting Table",
   "item.breached.tier_3_crafting_bench": "Netherite Crafting Table",
   "block.breached.landlock_block": "Landlock Block",
-  "item.breached.landlock_block": "Landlock Block"
+  "item.breached.landlock_block": "Landlock Block",
+  "item.breached.iron_breacher": "Iron Breacher",
+  "item.breached.diamond_breacher": "Diamond Breacher",
+  "item.breached.netherite_breacher": "Netherite Breacher",
+  "item.breached.probe": "Probe"
 }

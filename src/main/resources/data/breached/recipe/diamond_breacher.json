@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "D": "minecraft:diamond_block",
+    "G": "minecraft:gold_block"
+  },
+  "pattern": [
+    "DDD",
+    " G ",
+    " G "
+  ],
+  "result": {
+    "count": 1,
+    "id": "breached:diamond_breacher"
+  }
+}
