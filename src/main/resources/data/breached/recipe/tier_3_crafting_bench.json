@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "key": {
+    "B": "minecraft:beacon",
+    "D": "minecraft:diamond_block",
+    "N": "minecraft:netherite_block",
+    "T": "breached:tier_2_crafting_bench"
+  },
+  "pattern": [
+    "DBD",
+    "DTD",
+    "DND"
+  ],
+  "result": {
+    "count": 1,
+    "id": "breached:tier_3_crafting_bench"
+  }
+}

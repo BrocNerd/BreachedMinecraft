@@ -5,8 +5,10 @@ import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.screen.CraftingScreenHandler;
 import net.minecraft.screen.ScreenHandlerContext;
 import nrd.breached.Breached;
+import nrd.breached.crafting.CraftingTier;
+import nrd.breached.crafting.CraftingTierProvider;
 
-public class DiamondCraftingScreenHandler extends CraftingScreenHandler {
+public class DiamondCraftingScreenHandler extends CraftingScreenHandler implements CraftingTierProvider {
     private final ScreenHandlerContext context;
 
     public DiamondCraftingScreenHandler(int syncId, PlayerInventory playerInventory, ScreenHandlerContext context) {
@@ -17,5 +19,10 @@ public class DiamondCraftingScreenHandler extends CraftingScreenHandler {
     @Override
     public boolean canUse(PlayerEntity player) {
         return canUse(this.context, player, Breached.TIER_2_CRAFTING_BENCH);
+    }
+
+    @Override
+    public CraftingTier breached$getCraftingTier() {
+        return CraftingTier.TIER_2;
     }
 }
