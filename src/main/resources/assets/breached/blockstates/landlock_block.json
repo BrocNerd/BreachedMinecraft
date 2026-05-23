@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "breached:block/landlock_block"
+    }
+  }
+}
