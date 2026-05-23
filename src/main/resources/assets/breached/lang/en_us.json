@@ -4,5 +4,7 @@
   "block.breached.tier_2_crafting_bench": "Diamond Crafting Table",
   "item.breached.tier_2_crafting_bench": "Diamond Crafting Table",
   "block.breached.tier_3_crafting_bench": "Netherite Crafting Table",
-  "item.breached.tier_3_crafting_bench": "Netherite Crafting Table"
+  "item.breached.tier_3_crafting_bench": "Netherite Crafting Table",
+  "block.breached.landlock_block": "Landlock Block",
+  "item.breached.landlock_block": "Landlock Block"
 }

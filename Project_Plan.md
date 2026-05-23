@@ -30,9 +30,9 @@ Tier 2 - Diamond. Updated crafting recipe to 4 diamond blocks and 4 redstone blo
 Tier 3 - Netherite. Updated recipe to 1 beacon 5 diamond blocks and 1 netherite block and 1 tier 2 crafting table. Bookshelves unlocked.
 
 
-TC Block to claim chunks:
+Landlock Block to claim chunks:
 
-Craftable block that would allow you (and your team) to “claim” a chunk and the surrounding chunks (essentially a 3x3 chunk area or 48x48 block area). Only you (and team members) are able to interact with or place any blocks within this chunk (but not containers, anyone can still access them). Can be broken to destroy claim. TC claims may not overlap, and TC blocks must be at least 64 blocks apart. No block damage from explosives or fire in claimed chunks. Give feedback when area is claimed, and allow for an ability to see claimed chunks. 3 Tc’s Max per team, allow for ability to see current tc amount. TC can be instantly replaced after break - this means teams must be prepared with a TC and confirmation of kill on every active team member to completely take control of a base.
+Craftable block that would allow you (and your team) to “claim” a chunk and the surrounding chunks (essentially a 3x3 chunk area or 48x48 block area). Only you (and team members) are able to interact with or place any blocks within this chunk (but not containers, anyone can still access them). Can be broken to destroy claim. Landlock claims may not overlap, and Landlock blocks must be at least 64 blocks apart. No block damage from explosives or fire in claimed chunks. Give feedback when area is claimed, and allow for an ability to see claimed chunks. 3 Landlocks’s Max per team, allow for ability to see current Landlock amount. Landlock can be instantly replaced after break - this means teams must be prepared with a Landlock and confirmation of kill on every active team member to completely take control of a base.
 
 Breach Tool (probably Pickaxe):
 
@@ -40,9 +40,9 @@ Pickaxe with minimal durability, but ability to break blocks within claimed chun
 
 Teams:
 
-Team creation in coordination with TC Block and claimed chunks.
+Team creation in coordination with Landlock Block and claimed chunks.
 Teammates can still damage each other.
-Only teammates can break blocks within TC.
+Only teammates can break blocks within Landlock claims..
 Team chat and Team list commands. Team admin/owner with permission to add/remove teammates.
 
 Revamped Loot Tables:
@@ -99,8 +99,8 @@ Goal: Create teams, team commands, team ownership, team chat, and team permissio
 Notes:
 
 
-Phase 5 — TC Claim System
-Goal: Add Tool Cupboards that claim land, protect blocks, manage ownership, and enforce TC limits.
+Phase 5 — Landlock Claim System
+Goal: Add Landlock block that claim land, protect blocks, manage ownership, and enforce TC limits.
 Notes:
 
 
