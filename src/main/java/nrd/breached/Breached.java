@@ -1,7 +1,10 @@
 package nrd.breached;
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.entity.event.v1.EntitySleepEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
+import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
@@ -12,6 +15,8 @@ import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FenceGateBlock;
 import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.block.entity.BlockEntityType;
+import net.minecraft.entity.passive.VillagerEntity;
+import net.minecraft.entity.passive.WanderingTraderEntity;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.Item;
@@ -22,6 +27,7 @@ import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 import nrd.breached.block.DiamondCraftingTableBlock;
 import nrd.breached.block.IronCraftingTableBlock;
@@ -30,12 +36,17 @@ import nrd.breached.block.LandlockBlockEntity;
 import nrd.breached.block.NetheriteCraftingTableBlock;
 import nrd.breached.item.BreacherItem;
 import nrd.breached.landlock.LandlockClaimManager;
+import nrd.breached.respawn.RespawnCooldownManager;
 import nrd.breached.team.TeamCommands;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 import java.util.function.Function;
 
 public class Breached implements ModInitializer {
     public static final String MOD_ID = "breached";
+    private static final Map<UUID, Long> LAST_VILLAGER_TRADE_MESSAGE_TICKS = new HashMap<>();
 
     public static final Block TIER_1_CRAFTING_BENCH = registerBlock(
             "tier_1_crafting_bench",
@@ -123,6 +134,8 @@ public class Breached implements ModInitializer {
         registerLandlockProtectionEvents();
         registerLandlockPlacementProtectionEvents();
         registerLandlockDoorProtectionEvents();
+        registerRespawnEvents();
+        registerVillagerTradingLock();
 
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.FUNCTIONAL).register(entries -> {
             entries.add(TIER_1_CRAFTING_BENCH);
@@ -136,6 +149,30 @@ public class Breached implements ModInitializer {
             entries.add(DIAMOND_BREACHER);
             entries.add(NETHERITE_BREACHER);
             entries.add(PROBE);
+        });
+    }
+
+    private static void registerRespawnEvents() {
+        EntitySleepEvents.ALLOW_RESETTING_TIME.register(player -> false);
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> RespawnCooldownManager.applyPendingBedRespawnCooldown(newPlayer));
+    }
+
+    private static void registerVillagerTradingLock() {
+        // TODO: Revisit village and structure loot table balance after custom POIs are designed.
+        UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+            if (world.isClient() || hand != Hand.MAIN_HAND || !(entity instanceof VillagerEntity || entity instanceof WanderingTraderEntity)) {
+                return ActionResult.PASS;
+            }
+
+            long worldTime = world.getTime();
+            Long lastMessageTime = LAST_VILLAGER_TRADE_MESSAGE_TICKS.get(player.getUuid());
+            if (lastMessageTime != null && worldTime - lastMessageTime <= 1) {
+                return ActionResult.SUCCESS;
+            }
+
+            LAST_VILLAGER_TRADE_MESSAGE_TICKS.put(player.getUuid(), worldTime);
+            player.sendMessage(Text.literal("Villager trading is disabled in Breached."), false);
+            return ActionResult.SUCCESS;
         });
     }
 
@@ -213,11 +250,11 @@ public class Breached implements ModInitializer {
 
     private static void registerLandlockDebugEvents() {
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
-            if (world.isClient() || !player.isSneaking()) {
+            if (world.isClient() || hand != Hand.MAIN_HAND || !player.isSneaking()) {
                 return ActionResult.PASS;
             }
 
-            if (!player.getMainHandStack().isOf(PROBE) && !player.getOffHandStack().isOf(PROBE)) {
+            if (!player.getMainHandStack().isOf(PROBE)) {
                 return ActionResult.PASS;
             }
 

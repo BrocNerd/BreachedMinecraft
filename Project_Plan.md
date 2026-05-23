@@ -105,16 +105,10 @@ Respawn:
 
 Beds function as respawn points only.
 Beds do not skip night.
-Each player may have multiple beds, but each bed has a 60-second cooldown.
-Beds cannot be placed inside enemy claims.
-Beds cannot be placed within 32 blocks of another bed from the same team/player.
-Enemy players can destroy beds if physically reached.
-Beds inside your team claim are protected like other blocks.
-Beds outside claims are vulnerable.
+Beds have a 60-second cooldown. When on cooldown, players spawn at the world spawn.
 
 Anti-Cheese:
 
-No Beds inside other teams claim.
 Villager Trading severely nerfed (max loot is tier 1).
 
 Rust in Minecraft Development Phases
@@ -154,8 +148,8 @@ Goal: Make beds work like Rust sleeping bags: respawn-only, cooldown-based, limi
 Notes:
 
 
-Phase 8 — Loot and Villager Balance
-Goal: Cap loot and villager progression so players cannot skip the tiered crafting system.
+Phase 8 — Villager Balance
+Goal: Disable Villager trading.
 Notes:
 
 

@@ -6,7 +6,8 @@
   "mixins": [
     "BlockBreakingDeltaMixin",
     "CraftingScreenHandlerMixin",
-    "ItemStackMixin"
+    "ItemStackMixin",
+    "ServerPlayerRespawnMixin"
   ],
   "injectors": {
     "defaultRequire": 1
