@@ -6,7 +6,6 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.block.Blocks;
-import net.minecraft.block.NetherPortalBlock;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemPlacementContext;
@@ -16,8 +15,12 @@ import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.ServerDynamicRegistryType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.structure.StructurePlacementData;
+import net.minecraft.structure.StructureTemplate;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.BlockMirror;
+import net.minecraft.util.BlockRotation;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
@@ -43,9 +46,12 @@ import java.util.Set;
 public final class BreachedDimensionRules {
     private static final double BORDER_CENTER = 0.0D;
     private static final long OFFICIAL_PORTAL_SEED_SALT = 0x42D5A3B91F0C7E66L;
-    private static final int PORTAL_PLATFORM_RADIUS = 4;
     private static final int PORTAL_PROTECTION_RADIUS = 24;
     private static final int PORTAL_PROTECTION_RADIUS_SQUARED = PORTAL_PROTECTION_RADIUS * PORTAL_PROTECTION_RADIUS;
+    private static final Identifier OFFICIAL_PORTAL_STRUCTURE_ID = Identifier.of(Breached.MOD_ID, "portal");
+    private static final int PORTAL_STRUCTURE_X_OFFSET = 0;
+    private static final int PORTAL_STRUCTURE_Z_OFFSET = 0;
+    private static final int PORTAL_ACTIVE_CHECK_RADIUS = 16;
     private static final int BLOCK_UPDATE_FLAGS = 2;
     private static final Set<PendingPortalPlacement> PENDING_PORTAL_PLACEMENTS = new HashSet<>();
     private static final PresetRules STANDARD_BREACHED_ISLAND = new PresetRules(
@@ -79,6 +85,7 @@ public final class BreachedDimensionRules {
         ServerChunkEvents.CHUNK_LOAD.register(BreachedDimensionRules::enqueueOfficialPortalStructures);
         ServerTickEvents.END_WORLD_TICK.register(BreachedDimensionRules::placePendingOfficialPortalStructures);
         registerOfficialPortalProtectionEvents();
+        CentralSpawnPoiManager.register();
     }
 
     private static void applyForBreachedIsland(MinecraftServer server, ServerWorld world) {
@@ -158,106 +165,48 @@ public final class BreachedDimensionRules {
             return;
         }
 
-        Integer frameBaseY = findPortalFrameBaseY(world, coordinate);
-        if (frameBaseY == null) {
-            int platformY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, coordinate.x(), coordinate.z());
-            placePortalPlatform(world, coordinate, platformY);
-            frameBaseY = platformY + 1;
-            placePortalFrame(world, coordinate, frameBaseY);
-
-            System.out.println("[Breached] Placed official Overworld Nether portal structure " + portalNumber
-                    + " for " + rules.presetId() + " at x " + coordinate.x() + ", y " + platformY + ", z " + coordinate.z() + ".");
+        Optional<StructureTemplate> template = world.getStructureTemplateManager().getTemplate(OFFICIAL_PORTAL_STRUCTURE_ID);
+        if (template.isEmpty()) {
+            System.out.println("[Breached] Official Nether portal structure " + OFFICIAL_PORTAL_STRUCTURE_ID + " was not found.");
+            return;
         }
 
-        placePortalBlocks(world, coordinate, frameBaseY);
+        int x = coordinate.x() + PORTAL_STRUCTURE_X_OFFSET;
+        int z = coordinate.z() + PORTAL_STRUCTURE_Z_OFFSET;
+        int y = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+        BlockPos pos = new BlockPos(x, y, z);
+        ChunkPos chunkPos = new ChunkPos(pos);
+        world.getChunk(chunkPos.x, chunkPos.z);
+
+        StructurePlacementData placementData = new StructurePlacementData()
+                .setMirror(BlockMirror.NONE)
+                .setRotation(BlockRotation.NONE)
+                .setIgnoreEntities(false)
+                .setUpdateNeighbors(true);
+
+        template.get().place(world, pos, pos, placementData, net.minecraft.util.math.random.Random.create(world.getSeed()), BLOCK_UPDATE_FLAGS);
+
+        System.out.println("[Breached] Placed official Overworld Nether portal structure " + portalNumber
+                + " using " + OFFICIAL_PORTAL_STRUCTURE_ID + " for " + rules.presetId()
+                + " at x " + x + ", y " + y + ", z " + z + ".");
     }
 
     private static boolean hasActivePortal(ServerWorld world, PortalCoordinate coordinate) {
-        Integer frameBaseY = findPortalFrameBaseY(world, coordinate);
-        if (frameBaseY == null) {
-            return false;
-        }
-
-        for (int yOffset = 1; yOffset <= 3; yOffset++) {
-            if (!world.getBlockState(new BlockPos(coordinate.x(), frameBaseY + yOffset, coordinate.z())).isOf(Blocks.NETHER_PORTAL)
-                    || !world.getBlockState(new BlockPos(coordinate.x() + 1, frameBaseY + yOffset, coordinate.z())).isOf(Blocks.NETHER_PORTAL)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static Integer findPortalFrameBaseY(ServerWorld world, PortalCoordinate coordinate) {
         int topY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, coordinate.x(), coordinate.z());
-        int minY = Math.max(world.getBottomY(), topY - 16);
+        int minY = Math.max(world.getBottomY(), topY - 32);
+        int maxY = Math.min(world.getTopYInclusive(), topY + 32);
 
-        for (int y = topY + 1; y >= minY; y--) {
-            if (isPortalFrameBase(world, coordinate, y)) {
-                return y;
+        for (int xOffset = -PORTAL_ACTIVE_CHECK_RADIUS; xOffset <= PORTAL_ACTIVE_CHECK_RADIUS; xOffset++) {
+            for (int zOffset = -PORTAL_ACTIVE_CHECK_RADIUS; zOffset <= PORTAL_ACTIVE_CHECK_RADIUS; zOffset++) {
+                for (int y = minY; y <= maxY; y++) {
+                    if (world.getBlockState(new BlockPos(coordinate.x() + xOffset, y, coordinate.z() + zOffset)).isOf(Blocks.NETHER_PORTAL)) {
+                        return true;
+                    }
+                }
             }
         }
 
-        return null;
-    }
-
-    private static boolean isPortalFrameBase(ServerWorld world, PortalCoordinate coordinate, int baseY) {
-        for (int xOffset = -1; xOffset <= 2; xOffset++) {
-            if (!world.getBlockState(new BlockPos(coordinate.x() + xOffset, baseY, coordinate.z())).isOf(Blocks.OBSIDIAN)
-                    || !world.getBlockState(new BlockPos(coordinate.x() + xOffset, baseY + 4, coordinate.z())).isOf(Blocks.OBSIDIAN)) {
-                return false;
-            }
-        }
-
-        for (int yOffset = 1; yOffset <= 3; yOffset++) {
-            if (!world.getBlockState(new BlockPos(coordinate.x() - 1, baseY + yOffset, coordinate.z())).isOf(Blocks.OBSIDIAN)
-                    || !world.getBlockState(new BlockPos(coordinate.x() + 2, baseY + yOffset, coordinate.z())).isOf(Blocks.OBSIDIAN)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static void placePortalPlatform(ServerWorld world, PortalCoordinate coordinate, int y) {
-        for (int xOffset = -PORTAL_PLATFORM_RADIUS; xOffset <= PORTAL_PLATFORM_RADIUS; xOffset++) {
-            for (int zOffset = -PORTAL_PLATFORM_RADIUS; zOffset <= PORTAL_PLATFORM_RADIUS; zOffset++) {
-                world.setBlockState(
-                        new BlockPos(coordinate.x() + xOffset, y, coordinate.z() + zOffset),
-                        Blocks.STONE_BRICKS.getDefaultState(),
-                        BLOCK_UPDATE_FLAGS
-                );
-            }
-        }
-    }
-
-    private static void placePortalFrame(ServerWorld world, PortalCoordinate coordinate, int baseY) {
-        for (int xOffset = -1; xOffset <= 2; xOffset++) {
-            world.setBlockState(new BlockPos(coordinate.x() + xOffset, baseY, coordinate.z()), Blocks.OBSIDIAN.getDefaultState(), BLOCK_UPDATE_FLAGS);
-            world.setBlockState(new BlockPos(coordinate.x() + xOffset, baseY + 4, coordinate.z()), Blocks.OBSIDIAN.getDefaultState(), BLOCK_UPDATE_FLAGS);
-        }
-
-        for (int yOffset = 1; yOffset <= 3; yOffset++) {
-            world.setBlockState(new BlockPos(coordinate.x() - 1, baseY + yOffset, coordinate.z()), Blocks.OBSIDIAN.getDefaultState(), BLOCK_UPDATE_FLAGS);
-            world.setBlockState(new BlockPos(coordinate.x() + 2, baseY + yOffset, coordinate.z()), Blocks.OBSIDIAN.getDefaultState(), BLOCK_UPDATE_FLAGS);
-            world.setBlockState(new BlockPos(coordinate.x(), baseY + yOffset, coordinate.z()), Blocks.AIR.getDefaultState(), BLOCK_UPDATE_FLAGS);
-            world.setBlockState(new BlockPos(coordinate.x() + 1, baseY + yOffset, coordinate.z()), Blocks.AIR.getDefaultState(), BLOCK_UPDATE_FLAGS);
-        }
-    }
-
-    private static void placePortalBlocks(ServerWorld world, PortalCoordinate coordinate, int frameBaseY) {
-        for (int yOffset = 1; yOffset <= 3; yOffset++) {
-            world.setBlockState(
-                    new BlockPos(coordinate.x(), frameBaseY + yOffset, coordinate.z()),
-                    Blocks.NETHER_PORTAL.getDefaultState().with(NetherPortalBlock.AXIS, Direction.Axis.X),
-                    BLOCK_UPDATE_FLAGS
-            );
-            world.setBlockState(
-                    new BlockPos(coordinate.x() + 1, frameBaseY + yOffset, coordinate.z()),
-                    Blocks.NETHER_PORTAL.getDefaultState().with(NetherPortalBlock.AXIS, Direction.Axis.X),
-                    BLOCK_UPDATE_FLAGS
-            );
-        }
+        return false;
     }
 
     public static boolean shouldBlockNetherPortalCreation(World world, BlockPos pos) {
