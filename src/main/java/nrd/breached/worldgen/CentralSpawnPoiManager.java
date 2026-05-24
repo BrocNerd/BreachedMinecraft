@@ -31,7 +31,7 @@ import java.util.Optional;
 public final class CentralSpawnPoiManager {
     private static final Identifier STRUCTURE_ID = Identifier.of(Breached.MOD_ID, "central_spawn");
     // Distance between the two structure reference corners.
-    private static final int REFERENCE_CORNER_SPACING = 55;
+    private static final int REFERENCE_CORNER_SPACING = 72;
     private static final int FIRST_STRUCTURE_X_OFFSET = -REFERENCE_CORNER_SPACING / 2;
     private static final int FIRST_STRUCTURE_Z_OFFSET = 0;
     private static final int SECOND_STRUCTURE_X_OFFSET = FIRST_STRUCTURE_X_OFFSET + REFERENCE_CORNER_SPACING;
@@ -42,9 +42,8 @@ public final class CentralSpawnPoiManager {
     private static final int SITE_HALF_X = 72;
     private static final int SITE_HALF_Z = 40;
     private static final int SITE_CANDIDATES_PER_TICK = 1;
-    private static final int ACCEPTABLE_HEIGHT_RANGE = 4;
-    // Structure origin Y relative to the chosen surface. 1 means the structure sits on top of the ground.
-    private static final int STRUCTURE_Y_OFFSET_FROM_SURFACE = 1;
+    // Heightmaps return the first air block above the surface, so 0 places the structure on the ground.
+    private static final int STRUCTURE_Y_OFFSET_FROM_SURFACE = 0;
     private static final int PROTECTION_RADIUS = 72;
     private static final int PROTECTION_RADIUS_SQUARED = PROTECTION_RADIUS * PROTECTION_RADIUS;
     private static final int BLOCK_UPDATE_FLAGS = 2;
@@ -98,9 +97,9 @@ public final class CentralSpawnPoiManager {
         placeStructure(world, template, secondStructureX, structureY, secondStructureZ, BlockMirror.LEFT_RIGHT, BlockRotation.CLOCKWISE_180);
         state.markPlaced(site.centerX(), site.centerZ());
 
-        System.out.println("[Breached] Placed central spawn POI using " + STRUCTURE_ID + " at reference corners x "
-                + firstStructureX + ", z " + firstStructureZ + " and x "
-                + secondStructureX + ", z " + secondStructureZ + " near center x "
+        System.out.println("[Breached] Placed central_spawn.nbt using " + STRUCTURE_ID + " at x "
+                + firstStructureX + ", y " + structureY + ", z " + firstStructureZ + " and x "
+                + secondStructureX + ", y " + structureY + ", z " + secondStructureZ + " near center x "
                 + site.centerX() + ", z " + site.centerZ() + " on surface y " + site.surfaceY()
                 + " after finding terrain height range " + site.heightRange() + ".");
     }
@@ -112,10 +111,7 @@ public final class CentralSpawnPoiManager {
             System.out.println("[Breached] Searching for central spawn POI surface site within " + SITE_SEARCH_RADIUS + " blocks of world spawn.");
         }
 
-        SiteCandidate acceptableSite = searchState.evaluateNextSites(world);
-        if (acceptableSite != null) {
-            return acceptableSite;
-        }
+        searchState.evaluateNextSites(world);
 
         if (!searchState.isComplete()) {
             return null;
@@ -136,6 +132,7 @@ public final class CentralSpawnPoiManager {
         int maxY = Integer.MIN_VALUE;
         int liquidSamples = 0;
         int samples = 0;
+        List<Integer> surfaceHeights = new ArrayList<>();
 
         for (int x = centerX - SITE_HALF_X; x <= centerX + SITE_HALF_X; x += SITE_SAMPLE_STEP) {
             for (int z = centerZ - SITE_HALF_Z; z <= centerZ + SITE_HALF_Z; z += SITE_SAMPLE_STEP) {
@@ -147,6 +144,7 @@ public final class CentralSpawnPoiManager {
 
                 minY = Math.min(minY, surfaceY);
                 maxY = Math.max(maxY, surfaceY);
+                surfaceHeights.add(surfaceY);
                 samples++;
             }
         }
@@ -158,7 +156,12 @@ public final class CentralSpawnPoiManager {
         int heightRange = maxY - minY;
         int distanceScore = (xOffset * xOffset + zOffset * zOffset) / SITE_SEARCH_STEP;
         int score = heightRange * 100_000 + distanceScore;
-        return new SiteCandidate(centerX, centerZ, maxY, heightRange, score);
+        return new SiteCandidate(centerX, centerZ, getMedianSurfaceY(surfaceHeights), heightRange, score);
+    }
+
+    private static int getMedianSurfaceY(List<Integer> surfaceHeights) {
+        surfaceHeights.sort(Integer::compareTo);
+        return surfaceHeights.get(surfaceHeights.size() / 2);
     }
 
     private static int getSurfaceY(ServerWorld world, int x, int z) {
@@ -255,9 +258,8 @@ public final class CentralSpawnPoiManager {
             this.offsets = createCandidateOffsets();
         }
 
-        private SiteCandidate evaluateNextSites(ServerWorld world) {
+        private void evaluateNextSites(ServerWorld world) {
             int evaluated = 0;
-            SiteCandidate acceptableSite = null;
 
             while (evaluated < SITE_CANDIDATES_PER_TICK && nextIndex < offsets.size()) {
                 CandidateOffset offset = offsets.get(nextIndex);
@@ -278,14 +280,7 @@ public final class CentralSpawnPoiManager {
                 if (best == null || candidate.score() < best.score()) {
                     best = candidate;
                 }
-
-                if (candidate.heightRange() <= ACCEPTABLE_HEIGHT_RANGE) {
-                    acceptableSite = candidate;
-                    break;
-                }
             }
-
-            return acceptableSite;
         }
 
         private boolean isComplete() {
