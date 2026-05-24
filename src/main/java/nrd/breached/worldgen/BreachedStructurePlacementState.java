@@ -15,12 +15,17 @@ import java.util.Set;
 
 public class BreachedStructurePlacementState extends PersistentState {
     private static final String PLACEMENTS_KEY = "placements";
+    private static final String RESERVATIONS_KEY = "reservations";
     private static final String FAILED_CANDIDATES_KEY = "failed_candidates";
     private static final String CENTER_X_KEY = "center_x";
     private static final String CENTER_Z_KEY = "center_z";
     private static final String ORIGIN_X_KEY = "origin_x";
     private static final String ORIGIN_Y_KEY = "origin_y";
     private static final String ORIGIN_Z_KEY = "origin_z";
+    private static final String STRUCTURE_KEY = "structure_key";
+    private static final String CANDIDATE_INDEX_KEY = "candidate_index";
+    private static final String X_KEY = "x";
+    private static final String Z_KEY = "z";
     private static final Codec<BreachedStructurePlacementState> CODEC = NbtCompound.CODEC.xmap(
             BreachedStructurePlacementState::fromNbt,
             BreachedStructurePlacementState::toNbt
@@ -33,6 +38,7 @@ public class BreachedStructurePlacementState extends PersistentState {
     );
 
     private final Map<String, SavedPlacement> placements = new HashMap<>();
+    private final Map<String, ReservedPlacement> reservations = new HashMap<>();
     private final Map<String, Set<Integer>> failedCandidates = new HashMap<>();
 
     public static BreachedStructurePlacementState get(MinecraftServer server) {
@@ -49,6 +55,19 @@ public class BreachedStructurePlacementState extends PersistentState {
 
     public Set<Map.Entry<String, SavedPlacement>> placements() {
         return placements.entrySet();
+    }
+
+    public boolean hasReservation(String key) {
+        return reservations.containsKey(key);
+    }
+
+    public Set<Map.Entry<String, ReservedPlacement>> reservations() {
+        return reservations.entrySet();
+    }
+
+    public void reservePlacement(String key, String structureKey, int candidateIndex, int x, int z) {
+        reservations.put(key, new ReservedPlacement(structureKey, candidateIndex, x, z));
+        markDirty();
     }
 
     public boolean hasFailedCandidate(String key, int candidateIndex) {
@@ -83,6 +102,7 @@ public class BreachedStructurePlacementState extends PersistentState {
     private NbtCompound toNbt() {
         NbtCompound root = new NbtCompound();
         NbtCompound placementRoot = new NbtCompound();
+        NbtCompound reservationRoot = new NbtCompound();
         NbtCompound failedRoot = new NbtCompound();
 
         for (Map.Entry<String, SavedPlacement> entry : placements.entrySet()) {
@@ -96,6 +116,16 @@ public class BreachedStructurePlacementState extends PersistentState {
             placementRoot.put(entry.getKey(), placementNbt);
         }
 
+        for (Map.Entry<String, ReservedPlacement> entry : reservations.entrySet()) {
+            ReservedPlacement reservation = entry.getValue();
+            NbtCompound reservationNbt = new NbtCompound();
+            reservationNbt.putString(STRUCTURE_KEY, reservation.structureKey());
+            reservationNbt.putInt(CANDIDATE_INDEX_KEY, reservation.candidateIndex());
+            reservationNbt.putInt(X_KEY, reservation.x());
+            reservationNbt.putInt(Z_KEY, reservation.z());
+            reservationRoot.put(entry.getKey(), reservationNbt);
+        }
+
         for (Map.Entry<String, Set<Integer>> entry : failedCandidates.entrySet()) {
             NbtCompound failedNbt = new NbtCompound();
             for (int candidateIndex : entry.getValue()) {
@@ -106,6 +136,7 @@ public class BreachedStructurePlacementState extends PersistentState {
         }
 
         root.put(PLACEMENTS_KEY, placementRoot);
+        root.put(RESERVATIONS_KEY, reservationRoot);
         root.put(FAILED_CANDIDATES_KEY, failedRoot);
         return root;
     }
@@ -126,6 +157,23 @@ public class BreachedStructurePlacementState extends PersistentState {
                         placementNbt.get().getInt(ORIGIN_X_KEY, 0),
                         placementNbt.get().getInt(ORIGIN_Y_KEY, 0),
                         placementNbt.get().getInt(ORIGIN_Z_KEY, 0)
+                ));
+            }
+        }
+
+        Optional<NbtCompound> reservationRoot = root.getCompound(RESERVATIONS_KEY);
+        if (reservationRoot.isPresent()) {
+            for (String key : reservationRoot.get().getKeys()) {
+                Optional<NbtCompound> reservationNbt = reservationRoot.get().getCompound(key);
+                if (reservationNbt.isEmpty()) {
+                    continue;
+                }
+
+                state.reservations.put(key, new ReservedPlacement(
+                        reservationNbt.get().getString(STRUCTURE_KEY, ""),
+                        reservationNbt.get().getInt(CANDIDATE_INDEX_KEY, 0),
+                        reservationNbt.get().getInt(X_KEY, 0),
+                        reservationNbt.get().getInt(Z_KEY, 0)
                 ));
             }
         }
@@ -154,5 +202,8 @@ public class BreachedStructurePlacementState extends PersistentState {
     }
 
     public record SavedPlacement(int centerX, int centerZ, int originX, int originY, int originZ) {
+    }
+
+    public record ReservedPlacement(String structureKey, int candidateIndex, int x, int z) {
     }
 }

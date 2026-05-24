@@ -44,7 +44,8 @@ public final class BreachedStructureDefinitions {
             BreachedStructureDefinition.SupportMode.WATER_MARKER_PILLARS,
             Blocks.DEEPSLATE_BRICKS,
             Blocks.REINFORCED_DEEPSLATE,
-            96
+            96,
+            BreachedStructureDefinition.PrePlacementCheck.NONE
     );
 
     public static final BreachedStructureDefinition OFFICIAL_NETHER_PORTAL = new BreachedStructureDefinition(
@@ -60,7 +61,7 @@ public final class BreachedStructureDefinitions {
             true,
             0x42D5A3B91F0C7E66L,
             24,
-            128,
+            700,
             true,
             false,
             true,
@@ -80,7 +81,8 @@ public final class BreachedStructureDefinitions {
             BreachedStructureDefinition.SupportMode.NONE,
             Blocks.AIR,
             Blocks.AIR,
-            0
+            0,
+            BreachedStructureDefinition.PrePlacementCheck.NO_ACTIVE_NETHER_PORTAL_NEARBY
     );
 
     public static final BreachedStructureDefinition HORACE = new BreachedStructureDefinition(
@@ -116,16 +118,19 @@ public final class BreachedStructureDefinitions {
             BreachedStructureDefinition.SupportMode.NONE,
             Blocks.AIR,
             Blocks.AIR,
-            0
+            0,
+            BreachedStructureDefinition.PrePlacementCheck.NONE
     );
 
     public static final List<BreachedStructureDefinition> PLANNED_STRUCTURES = List.of(
             SWORD_STATUE,
+            OFFICIAL_NETHER_PORTAL,
             HORACE
     );
 
     public static final List<BreachedStructureDefinition> PROTECTED_STRUCTURES = List.of(
-            SWORD_STATUE
+            SWORD_STATUE,
+            OFFICIAL_NETHER_PORTAL
     );
 
     private BreachedStructureDefinitions() {
@@ -143,6 +148,12 @@ public final class BreachedStructureDefinitions {
                 && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
                 && definition.structureId().equals(HORACE.structureId())) {
             return definition.withRadius(150, 425);
+        }
+
+        if (preset.isPresent()
+                && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
+                && definition.structureId().equals(OFFICIAL_NETHER_PORTAL.structureId())) {
+            return definition.withRadiusAndSpacing(200, 250, 300);
         }
 
         return definition;

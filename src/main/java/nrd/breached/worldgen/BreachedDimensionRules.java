@@ -75,9 +75,6 @@ public final class BreachedDimensionRules {
 
     public static void register() {
         ServerWorldEvents.LOAD.register(BreachedDimensionRules::applyForBreachedIsland);
-        ServerChunkEvents.CHUNK_LOAD.register(BreachedDimensionRules::enqueueOfficialPortalStructures);
-        ServerTickEvents.END_WORLD_TICK.register(BreachedDimensionRules::placePendingOfficialPortalStructures);
-        registerOfficialPortalProtectionEvents();
         BreachedStructurePlacementManager.register();
     }
 

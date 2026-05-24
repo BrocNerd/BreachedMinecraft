@@ -40,7 +40,8 @@ public record BreachedStructureDefinition(
         SupportMode supportMode,
         Block supportBlock,
         Block supportMarkerBlock,
-        int supportMaxDepth
+        int supportMaxDepth,
+        PrePlacementCheck prePlacementCheck
 ) {
     public enum TerrainValidation {
         LENIENT,
@@ -74,11 +75,20 @@ public record BreachedStructureDefinition(
         WATER_MARKER_PILLARS
     }
 
+    public enum PrePlacementCheck {
+        NONE,
+        NO_ACTIVE_NETHER_PORTAL_NEARBY
+    }
+
     public int protectionRadiusSquared() {
         return protectionRadius * protectionRadius;
     }
 
     public BreachedStructureDefinition withRadius(int minRadius, int maxRadius) {
+        return withRadiusAndSpacing(minRadius, maxRadius, spacingFromOtherBreachedStructures);
+    }
+
+    public BreachedStructureDefinition withRadiusAndSpacing(int minRadius, int maxRadius, int spacingFromOtherBreachedStructures) {
         return new BreachedStructureDefinition(
                 logName,
                 structureId,
@@ -112,7 +122,8 @@ public record BreachedStructureDefinition(
                 supportMode,
                 supportBlock,
                 supportMarkerBlock,
-                supportMaxDepth
+                supportMaxDepth,
+                prePlacementCheck
         );
     }
 }
