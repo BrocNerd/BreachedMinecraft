@@ -46,6 +46,7 @@ public final class BreachedDimensionRules {
     private static final int PORTAL_ACTIVE_CHECK_RADIUS = 16;
     private static final Set<PendingPortalPlacement> PENDING_PORTAL_PLACEMENTS = new HashSet<>();
     private static final PresetRules STANDARD_BREACHED_ISLAND = new PresetRules(
+            BreachedPreset.STANDARD,
             RegistryKey.of(RegistryKeys.WORLD_PRESET, Identifier.of(Breached.MOD_ID, "breached_island")),
             RegistryKey.of(RegistryKeys.CHUNK_GENERATOR_SETTINGS, Identifier.of(Breached.MOD_ID, "island_overworld")),
             "breached:breached_island",
@@ -55,6 +56,7 @@ public final class BreachedDimensionRules {
             1000
     );
     private static final PresetRules SMALL_BREACHED_ISLAND = new PresetRules(
+            BreachedPreset.SMALL,
             RegistryKey.of(RegistryKeys.WORLD_PRESET, Identifier.of(Breached.MOD_ID, "small_breached_island")),
             RegistryKey.of(RegistryKeys.CHUNK_GENERATOR_SETTINGS, Identifier.of(Breached.MOD_ID, "small_island_overworld")),
             "breached:small_breached_island",
@@ -76,7 +78,7 @@ public final class BreachedDimensionRules {
         ServerChunkEvents.CHUNK_LOAD.register(BreachedDimensionRules::enqueueOfficialPortalStructures);
         ServerTickEvents.END_WORLD_TICK.register(BreachedDimensionRules::placePendingOfficialPortalStructures);
         registerOfficialPortalProtectionEvents();
-        CentralSpawnPoiManager.register();
+        BreachedStructurePlacementManager.register();
     }
 
     private static void applyForBreachedIsland(MinecraftServer server, ServerWorld world) {
@@ -284,6 +286,10 @@ public final class BreachedDimensionRules {
         return getPresetRules(server).isPresent();
     }
 
+    public static Optional<BreachedPreset> getBreachedPreset(MinecraftServer server) {
+        return getPresetRules(server).map(PresetRules::preset);
+    }
+
     private static Optional<PresetRules> getPresetRules(MinecraftServer server) {
         Registry<DimensionOptions> dimensions = server.getCombinedDynamicRegistries()
                 .get(ServerDynamicRegistryType.DIMENSIONS)
@@ -317,7 +323,13 @@ public final class BreachedDimensionRules {
                 .isPresent();
     }
 
+    public enum BreachedPreset {
+        STANDARD,
+        SMALL
+    }
+
     private record PresetRules(
+            BreachedPreset preset,
             RegistryKey<WorldPreset> presetKey,
             RegistryKey<ChunkGeneratorSettings> overworldSettings,
             String presetId,

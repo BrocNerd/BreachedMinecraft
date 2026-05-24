@@ -3,6 +3,7 @@ package nrd.breached.worldgen;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.BlockMirror;
 import net.minecraft.util.BlockRotation;
+import net.minecraft.block.Block;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.world.World;
 
@@ -34,7 +35,12 @@ public record BreachedStructureDefinition(
         HeightSelection heightSelection,
         int sampleStep,
         BlockMirror mirror,
-        BlockRotation rotation
+        BlockRotation rotation,
+        SurfaceRequirement surfaceRequirement,
+        SupportMode supportMode,
+        Block supportBlock,
+        Block supportMarkerBlock,
+        int supportMaxDepth
 ) {
     public enum TerrainValidation {
         LENIENT,
@@ -53,6 +59,19 @@ public record BreachedStructureDefinition(
         DISTRIBUTED_RING,
         RANDOM_WITHIN_BORDER,
         CAVE
+    }
+
+    public enum SurfaceRequirement {
+        ALLOW_WATER,
+        AVOID_WATER,
+        REQUIRE_WATER,
+        MOSTLY_WATER
+    }
+
+    public enum SupportMode {
+        NONE,
+        WATER_SOLID_FOOTPRINT,
+        WATER_MARKER_PILLARS
     }
 
     public int protectionRadiusSquared() {
@@ -88,7 +107,12 @@ public record BreachedStructureDefinition(
                 heightSelection,
                 sampleStep,
                 mirror,
-                rotation
+                rotation,
+                surfaceRequirement,
+                supportMode,
+                supportBlock,
+                supportMarkerBlock,
+                supportMaxDepth
         );
     }
 }

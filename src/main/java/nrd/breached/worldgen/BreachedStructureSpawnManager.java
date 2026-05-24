@@ -14,73 +14,14 @@ import net.minecraft.util.math.Vec3i;
 import net.minecraft.util.math.random.Random;
 import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
-import nrd.breached.Breached;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 public final class BreachedStructureSpawnManager {
-    public static final BreachedStructureDefinition CENTRAL_SPAWN = new BreachedStructureDefinition(
-            "central_spawn.nbt",
-            Identifier.of(Breached.MOD_ID, "central_spawn"),
-            World.OVERWORLD,
-            1,
-            BreachedStructureDefinition.PlacementMode.CENTER_RADIUS,
-            0,
-            0,
-            0,
-            100,
-            false,
-            0x7C31B0E5A91D4F22L,
-            72,
-            128,
-            true,
-            true,
-            true,
-            true,
-            false,
-            true,
-            false,
-            true,
-            true,
-            0,
-            BreachedStructureDefinition.TerrainValidation.LENIENT,
-            BreachedStructureDefinition.HeightSelection.MEDIAN_SURFACE,
-            16,
-            BlockMirror.NONE,
-            BlockRotation.NONE
-    );
-    public static final BreachedStructureDefinition OFFICIAL_NETHER_PORTAL = new BreachedStructureDefinition(
-            "portal.nbt",
-            Identifier.of(Breached.MOD_ID, "portal"),
-            World.OVERWORLD,
-            2,
-            BreachedStructureDefinition.PlacementMode.DISTRIBUTED_RING,
-            0,
-            0,
-            450,
-            1000,
-            true,
-            0x42D5A3B91F0C7E66L,
-            24,
-            128,
-            true,
-            false,
-            true,
-            true,
-            false,
-            false,
-            false,
-            true,
-            false,
-            10,
-            BreachedStructureDefinition.TerrainValidation.LENIENT,
-            BreachedStructureDefinition.HeightSelection.ORIGIN_SURFACE,
-            16,
-            BlockMirror.NONE,
-            BlockRotation.NONE
-    );
+    public static final BreachedStructureDefinition CENTRAL_SPAWN = BreachedStructureDefinitions.SWORD_STATUE;
+    public static final BreachedStructureDefinition OFFICIAL_NETHER_PORTAL = BreachedStructureDefinitions.OFFICIAL_NETHER_PORTAL;
     private static final int BLOCK_UPDATE_FLAGS = 2;
 
     private BreachedStructureSpawnManager() {
@@ -245,9 +186,9 @@ public final class BreachedStructureSpawnManager {
             }
         }
 
-        if (shouldRejectLiquid(definition) && liquidSamples > 0) {
-            String reason = "rejected " + liquidSamples + " liquid surface samples";
-            return new BreachedStructureSite(originX, originZ, 0, minY, maxY, maxY - minY, Integer.MAX_VALUE, reason);
+        Optional<String> surfaceRejectionReason = getSurfaceRejectionReason(definition, liquidSamples, surfaceHeights.size());
+        if (surfaceRejectionReason.isPresent()) {
+            return new BreachedStructureSite(originX, originZ, 0, minY, maxY, maxY - minY, Integer.MAX_VALUE, surfaceRejectionReason.get());
         }
 
         int heightRange = maxY - minY;
@@ -309,8 +250,23 @@ public final class BreachedStructureSpawnManager {
         return world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
     }
 
-    private static boolean shouldRejectLiquid(BreachedStructureDefinition definition) {
-        return definition.avoidWater() || definition.terrainValidation() != BreachedStructureDefinition.TerrainValidation.LENIENT;
+    private static Optional<String> getSurfaceRejectionReason(
+            BreachedStructureDefinition definition,
+            int liquidSamples,
+            int sampleCount
+    ) {
+        return switch (definition.surfaceRequirement()) {
+            case ALLOW_WATER -> Optional.empty();
+            case AVOID_WATER -> liquidSamples > 0
+                    ? Optional.of("rejected " + liquidSamples + " liquid surface samples")
+                    : Optional.empty();
+            case REQUIRE_WATER -> liquidSamples < sampleCount
+                    ? Optional.of("required water at every surface sample but found " + liquidSamples + " of " + sampleCount)
+                    : Optional.empty();
+            case MOSTLY_WATER -> liquidSamples * 2 < sampleCount
+                    ? Optional.of("required mostly water but found " + liquidSamples + " liquid surface samples of " + sampleCount)
+                    : Optional.empty();
+        };
     }
 
     private static int getMedianSurfaceY(List<Integer> surfaceHeights) {
