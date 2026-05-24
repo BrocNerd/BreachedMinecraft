@@ -153,25 +153,14 @@ Goal: Disable Villager trading.
 Notes:
 
 
-Phase 9 — Structures and Exploration
+Phase 9, 10, 11 — Wipe Map / Island Generation for the Breach mod (including Nether and End rules).
+Goal: Create a compact island-style map with a limited world border for 1–2 week wipes. Ensure two Nether portals spawn consistently in overworld, and restrict player made nether portals. Remove end.
+Notes:
+
+
+Phase 12 — Structures and Exploration
 Goal: Add dungeons, taverns, and major structures with balanced loot and guaranteed availability.
 Notes:
-
-
-Phase 10 — World Border and Island Map
-Goal: Create a compact island-style map with a limited world border for 1–2 week wipes.
-Notes:
-
-
-Phase 11 — Nether Rules
-Goal: Restrict Nether access to fixed entrances, remove player-made portals, and prevent entrance claiming.
-Notes:
-
-
-Phase 12 — End Rules
-Goal: Disable the End for now.
-Notes:
-
 
 Phase 13 — Anti-Cheese Rules
 Goal: Prevent players from bypassing claim protection using pistons, hoppers, fluids, explosions, portals, or teleporting.

@@ -12,16 +12,24 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
 public class BreacherItem extends Item {
-    public static final float BLOCK_BREAKING_DELTA = 1.0F / 300.0F;
-    private static final float MINING_SPEED = 1.0F;
+    public static final float IRON_BLOCK_BREAKING_DELTA = 1.0F / 300.0F;
+    public static final float DIAMOND_BLOCK_BREAKING_DELTA = 1.0F / 200.0F;
+    public static final float NETHERITE_BLOCK_BREAKING_DELTA = 1.0F / 100.0F;
 
-    public BreacherItem(Settings settings) {
+    private final float blockBreakingDelta;
+
+    public BreacherItem(Settings settings, float blockBreakingDelta) {
         super(settings);
+        this.blockBreakingDelta = blockBreakingDelta;
     }
 
     @Override
     public float getMiningSpeed(ItemStack stack, BlockState state) {
-        return MINING_SPEED;
+        return blockBreakingDelta;
+    }
+
+    public float getBlockBreakingDelta() {
+        return blockBreakingDelta;
     }
 
     @Override

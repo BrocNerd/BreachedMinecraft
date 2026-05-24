@@ -21,7 +21,7 @@ public abstract class BlockBreakingDeltaMixin {
     @Inject(method = "calcBlockBreakingDelta", at = @At("HEAD"), cancellable = true)
     private void breached$useFlatBreacherBreakingDelta(PlayerEntity player, BlockView world, BlockPos pos, CallbackInfoReturnable<Float> cir) {
         ItemStack stack = player.getMainHandStack();
-        if (!(stack.getItem() instanceof BreacherItem)) {
+        if (!(stack.getItem() instanceof BreacherItem breacherItem)) {
             return;
         }
 
@@ -31,6 +31,6 @@ public abstract class BlockBreakingDeltaMixin {
             return;
         }
 
-        cir.setReturnValue(BreacherItem.BLOCK_BREAKING_DELTA);
+        cir.setReturnValue(breacherItem.getBlockBreakingDelta());
     }
 }

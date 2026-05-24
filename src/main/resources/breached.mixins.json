@@ -4,8 +4,11 @@
   "package": "nrd.breached.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "AbstractFireBlockMixin",
     "BlockBreakingDeltaMixin",
     "CraftingScreenHandlerMixin",
+    "FireChargeItemMixin",
+    "FlintAndSteelItemMixin",
     "ItemStackMixin",
     "ServerPlayerRespawnMixin"
   ],

@@ -38,6 +38,7 @@ import nrd.breached.item.BreacherItem;
 import nrd.breached.landlock.LandlockClaimManager;
 import nrd.breached.respawn.RespawnCooldownManager;
 import nrd.breached.team.TeamCommands;
+import nrd.breached.worldgen.BreachedDimensionRules;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -80,19 +81,19 @@ public class Breached implements ModInitializer {
 
     public static final Item IRON_BREACHER = registerItem(
             "iron_breacher",
-            BreacherItem::new,
-            new Item.Settings().maxDamage(1)
+            settings -> new BreacherItem(settings, BreacherItem.IRON_BLOCK_BREAKING_DELTA),
+            new Item.Settings().maxDamage(2)
     );
 
     public static final Item DIAMOND_BREACHER = registerItem(
             "diamond_breacher",
-            BreacherItem::new,
+            settings -> new BreacherItem(settings, BreacherItem.DIAMOND_BLOCK_BREAKING_DELTA),
             new Item.Settings().maxDamage(5)
     );
 
     public static final Item NETHERITE_BREACHER = registerItem(
             "netherite_breacher",
-            BreacherItem::new,
+            settings -> new BreacherItem(settings, BreacherItem.NETHERITE_BLOCK_BREAKING_DELTA),
             new Item.Settings().maxDamage(20).fireproof()
     );
 
@@ -136,6 +137,7 @@ public class Breached implements ModInitializer {
         registerLandlockDoorProtectionEvents();
         registerRespawnEvents();
         registerVillagerTradingLock();
+        BreachedDimensionRules.register();
 
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.FUNCTIONAL).register(entries -> {
             entries.add(TIER_1_CRAFTING_BENCH);

@@ -10,5 +10,6 @@
   "item.breached.iron_breacher": "Iron Breacher",
   "item.breached.diamond_breacher": "Diamond Breacher",
   "item.breached.netherite_breacher": "Netherite Breacher",
-  "item.breached.probe": "Probe"
+  "item.breached.probe": "Probe",
+  "generator.breached.breached_island": "Breached Island"
 }
