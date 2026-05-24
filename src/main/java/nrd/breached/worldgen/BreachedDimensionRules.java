@@ -15,12 +15,8 @@ import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.ServerDynamicRegistryType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.structure.StructurePlacementData;
-import net.minecraft.structure.StructureTemplate;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
-import net.minecraft.util.BlockMirror;
-import net.minecraft.util.BlockRotation;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
@@ -39,20 +35,15 @@ import net.minecraft.world.gen.WorldPresets;
 import nrd.breached.Breached;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
-import java.util.Random;
 import java.util.Set;
 
 public final class BreachedDimensionRules {
     private static final double BORDER_CENTER = 0.0D;
-    private static final long OFFICIAL_PORTAL_SEED_SALT = 0x42D5A3B91F0C7E66L;
-    private static final int PORTAL_PROTECTION_RADIUS = 24;
-    private static final int PORTAL_PROTECTION_RADIUS_SQUARED = PORTAL_PROTECTION_RADIUS * PORTAL_PROTECTION_RADIUS;
-    private static final Identifier OFFICIAL_PORTAL_STRUCTURE_ID = Identifier.of(Breached.MOD_ID, "portal");
     private static final int PORTAL_STRUCTURE_X_OFFSET = 0;
     private static final int PORTAL_STRUCTURE_Z_OFFSET = 0;
     private static final int PORTAL_ACTIVE_CHECK_RADIUS = 16;
-    private static final int BLOCK_UPDATE_FLAGS = 2;
     private static final Set<PendingPortalPlacement> PENDING_PORTAL_PLACEMENTS = new HashSet<>();
     private static final PresetRules STANDARD_BREACHED_ISLAND = new PresetRules(
             RegistryKey.of(RegistryKeys.WORLD_PRESET, Identifier.of(Breached.MOD_ID, "breached_island")),
@@ -165,30 +156,30 @@ public final class BreachedDimensionRules {
             return;
         }
 
-        Optional<StructureTemplate> template = world.getStructureTemplateManager().getTemplate(OFFICIAL_PORTAL_STRUCTURE_ID);
-        if (template.isEmpty()) {
-            System.out.println("[Breached] Official Nether portal structure " + OFFICIAL_PORTAL_STRUCTURE_ID + " was not found.");
-            return;
-        }
-
         int x = coordinate.x() + PORTAL_STRUCTURE_X_OFFSET;
         int z = coordinate.z() + PORTAL_STRUCTURE_Z_OFFSET;
-        int y = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
-        BlockPos pos = new BlockPos(x, y, z);
-        ChunkPos chunkPos = new ChunkPos(pos);
-        world.getChunk(chunkPos.x, chunkPos.z);
+        BreachedStructureDefinition definition = BreachedStructureSpawnManager.OFFICIAL_NETHER_PORTAL.withRadius(
+                rules.portalMinRadius(),
+                rules.portalMaxRadius()
+        );
+        Optional<BreachedStructurePlacement> placement = BreachedStructureSpawnManager.placeRadiusCandidate(
+                world,
+                definition,
+                new BreachedStructureSpawnManager.RadiusCandidate(
+                        portalNumber,
+                        x,
+                        z,
+                        coordinate.radius(),
+                        coordinate.angle()
+                )
+        );
 
-        StructurePlacementData placementData = new StructurePlacementData()
-                .setMirror(BlockMirror.NONE)
-                .setRotation(BlockRotation.NONE)
-                .setIgnoreEntities(false)
-                .setUpdateNeighbors(true);
-
-        template.get().place(world, pos, pos, placementData, net.minecraft.util.math.random.Random.create(world.getSeed()), BLOCK_UPDATE_FLAGS);
-
-        System.out.println("[Breached] Placed official Overworld Nether portal structure " + portalNumber
-                + " using " + OFFICIAL_PORTAL_STRUCTURE_ID + " for " + rules.presetId()
-                + " at x " + x + ", y " + y + ", z " + z + ".");
+        placement.ifPresent(structurePlacement -> System.out.println("[Breached] Registered official Overworld Nether portal structure "
+                + portalNumber
+                + " for " + rules.presetId()
+                + " at x " + x
+                + ", y " + structurePlacement.origin().getY()
+                + ", z " + z + "."));
     }
 
     private static boolean hasActivePortal(ServerWorld world, PortalCoordinate coordinate) {
@@ -264,10 +255,12 @@ public final class BreachedDimensionRules {
         }
 
         PresetRules rules = getPresetRules(serverWorld.getServer()).get();
+        BreachedStructureDefinition definition = BreachedStructureSpawnManager.OFFICIAL_NETHER_PORTAL.withRadius(
+                rules.portalMinRadius(),
+                rules.portalMaxRadius()
+        );
         for (PortalCoordinate coordinate : generateOfficialOverworldPortalCoordinates(serverWorld.getSeed(), rules)) {
-            long xDistance = pos.getX() - coordinate.x();
-            long zDistance = pos.getZ() - coordinate.z();
-            if (xDistance * xDistance + zDistance * zDistance <= PORTAL_PROTECTION_RADIUS_SQUARED) {
+            if (BreachedStructureSpawnManager.isInsideProtectionRadius(definition, coordinate.x(), coordinate.z(), pos)) {
                 return true;
             }
         }
@@ -276,25 +269,15 @@ public final class BreachedDimensionRules {
     }
 
     private static PortalCoordinate[] generateOfficialOverworldPortalCoordinates(long worldSeed, PresetRules rules) {
-        Random random = new Random(worldSeed ^ OFFICIAL_PORTAL_SEED_SALT);
-        double firstAngle = random.nextDouble() * Math.TAU;
-        double secondAngle = firstAngle + Math.PI + ((random.nextDouble() - 0.5D) * 0.7D);
+        BreachedStructureDefinition definition = BreachedStructureSpawnManager.OFFICIAL_NETHER_PORTAL.withRadius(
+                rules.portalMinRadius(),
+                rules.portalMaxRadius()
+        );
+        List<BreachedStructureSpawnManager.RadiusCandidate> candidates = BreachedStructureSpawnManager.generateRadiusCandidates(worldSeed, definition);
 
-        return new PortalCoordinate[] {
-                generatePortalCoordinate(random, firstAngle, rules),
-                generatePortalCoordinate(random, secondAngle, rules)
-        };
-    }
-
-    private static PortalCoordinate generatePortalCoordinate(Random random, double angle, PresetRules rules) {
-        int radius = rules.portalMinRadius() + random.nextInt(rules.portalMaxRadius() - rules.portalMinRadius() + 1);
-        int x = toChunkCenterCoordinate(Math.cos(angle) * radius);
-        int z = toChunkCenterCoordinate(Math.sin(angle) * radius);
-        return new PortalCoordinate(x, z);
-    }
-
-    private static int toChunkCenterCoordinate(double coordinate) {
-        return Math.floorDiv((int) Math.round(coordinate), 16) * 16 + 8;
+        return candidates.stream()
+                .map(candidate -> new PortalCoordinate(candidate.x(), candidate.z(), candidate.radius(), candidate.angle()))
+                .toArray(PortalCoordinate[]::new);
     }
 
     public static boolean isBreachedIslandWorld(MinecraftServer server) {
@@ -345,7 +328,7 @@ public final class BreachedDimensionRules {
     ) {
     }
 
-    private record PortalCoordinate(int x, int z) {
+    private record PortalCoordinate(int x, int z, int radius, double angle) {
     }
 
     private record PendingPortalPlacement(long worldSeed, String presetId, int portalNumber, PortalCoordinate coordinate) {

@@ -154,12 +154,12 @@ Notes:
 
 
 Phase 9, 10, 11 — Wipe Map / Island Generation for the Breach mod (including Nether and End rules).
-Goal: Create a compact island-style map with a limited world border for 1–2 week wipes. Ensure two Nether portals spawn consistently in overworld, and restrict player made nether portals. Remove end.
+Goal: Create a compact island-style map with a limited world border for 1–2 week wipes. Restrict player made nether portals.
 Notes:
 
 
 Phase 12 — Structures and Exploration
-Goal: Add dungeons, taverns, and major structures with balanced loot and guaranteed availability.
+Goal: Add Breached specific structures including Nether Portals and End portals, along with dungeons, taverns, and other POI's that contain loot from 3 tiered loot pools.
 Notes:
 
 Phase 13 — Anti-Cheese Rules
