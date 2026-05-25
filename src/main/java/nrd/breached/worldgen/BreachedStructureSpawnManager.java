@@ -2,6 +2,12 @@ package nrd.breached.worldgen;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.Block;
+import net.minecraft.inventory.LootableInventory;
+import net.minecraft.loot.LootTable;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.structure.StructurePlacementData;
 import net.minecraft.structure.StructureTemplate;
@@ -24,6 +30,31 @@ public final class BreachedStructureSpawnManager {
     public static final BreachedStructureDefinition CENTRAL_SPAWN = BreachedStructureDefinitions.SWORD_STATUE;
     public static final BreachedStructureDefinition OFFICIAL_NETHER_PORTAL = BreachedStructureDefinitions.OFFICIAL_NETHER_PORTAL;
     private static final int BLOCK_UPDATE_FLAGS = 2;
+    private static final List<Block> LOOTABLE_TEMPLATE_BLOCKS = List.of(
+            Blocks.CHEST,
+            Blocks.TRAPPED_CHEST,
+            Blocks.BARREL,
+            Blocks.DISPENSER,
+            Blocks.DROPPER,
+            Blocks.HOPPER,
+            Blocks.SHULKER_BOX,
+            Blocks.WHITE_SHULKER_BOX,
+            Blocks.LIGHT_GRAY_SHULKER_BOX,
+            Blocks.GRAY_SHULKER_BOX,
+            Blocks.BLACK_SHULKER_BOX,
+            Blocks.BROWN_SHULKER_BOX,
+            Blocks.RED_SHULKER_BOX,
+            Blocks.ORANGE_SHULKER_BOX,
+            Blocks.YELLOW_SHULKER_BOX,
+            Blocks.LIME_SHULKER_BOX,
+            Blocks.GREEN_SHULKER_BOX,
+            Blocks.CYAN_SHULKER_BOX,
+            Blocks.LIGHT_BLUE_SHULKER_BOX,
+            Blocks.BLUE_SHULKER_BOX,
+            Blocks.PURPLE_SHULKER_BOX,
+            Blocks.MAGENTA_SHULKER_BOX,
+            Blocks.PINK_SHULKER_BOX
+    );
 
     private BreachedStructureSpawnManager() {
     }
@@ -227,6 +258,7 @@ public final class BreachedStructureSpawnManager {
         }
 
         template.place(world, pos, pos, placementData, Random.create(world.getSeed()), BLOCK_UPDATE_FLAGS);
+        applyTemplateLootTables(world, template, pos, placementData);
 
         BreachedStructurePlacement placement = new BreachedStructurePlacement(
                 definition.structureId(),
@@ -294,6 +326,43 @@ public final class BreachedStructureSpawnManager {
 
     private static int toChunkCenterCoordinate(double coordinate) {
         return Math.floorDiv((int) Math.round(coordinate), 16) * 16 + 8;
+    }
+
+    private static void applyTemplateLootTables(
+            ServerWorld world,
+            StructureTemplate template,
+            BlockPos pos,
+            StructurePlacementData placementData
+    ) {
+        int appliedLootTables = 0;
+
+        for (Block block : LOOTABLE_TEMPLATE_BLOCKS) {
+            for (StructureTemplate.StructureBlockInfo blockInfo : template.getInfosForBlock(pos, placementData, block, true)) {
+                NbtCompound nbt = blockInfo.nbt();
+                if (nbt == null) {
+                    continue;
+                }
+
+                Optional<String> lootTableValue = nbt.getString("LootTable");
+                if (lootTableValue.isEmpty()) {
+                    continue;
+                }
+
+                Identifier lootTableId = Identifier.tryParse(lootTableValue.get());
+                if (lootTableId == null || !(world.getBlockEntity(blockInfo.pos()) instanceof LootableInventory lootableInventory)) {
+                    continue;
+                }
+
+                long lootTableSeed = nbt.getLong("LootTableSeed", 0L);
+                RegistryKey<LootTable> lootTableKey = RegistryKey.of(RegistryKeys.LOOT_TABLE, lootTableId);
+                lootableInventory.setLootTable(lootTableKey, lootTableSeed);
+                appliedLootTables++;
+            }
+        }
+
+        if (appliedLootTables > 0) {
+            System.out.println("[Breached] Applied " + appliedLootTables + " template container loot tables.");
+        }
     }
 
     private static void logPlacement(BreachedStructurePlacement placement, BlockMirror mirror, BlockRotation rotation) {
