@@ -5,6 +5,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.structure.StructurePlacementData;
 import net.minecraft.structure.StructureTemplate;
+import net.minecraft.structure.processor.BlockIgnoreStructureProcessor;
 import net.minecraft.util.BlockMirror;
 import net.minecraft.util.BlockRotation;
 import net.minecraft.util.Identifier;
@@ -221,6 +222,9 @@ public final class BreachedStructureSpawnManager {
                 .setRotation(rotation)
                 .setIgnoreEntities(false)
                 .setUpdateNeighbors(true);
+        if (definition.airPlacementMode() == BreachedStructureDefinition.AirPlacementMode.IGNORE_AIR) {
+            placementData.addProcessor(BlockIgnoreStructureProcessor.IGNORE_AIR);
+        }
 
         template.place(world, pos, pos, placementData, Random.create(world.getSeed()), BLOCK_UPDATE_FLAGS);
 

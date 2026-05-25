@@ -93,17 +93,17 @@ public final class BreachedStructureDefinitions {
             BreachedStructureDefinition.SpacingPolicy.MAJOR_ONLY,
             24,
             12,
-            BreachedStructureDefinition.AirPlacementMode.IGNORE_AIR,
+            BreachedStructureDefinition.AirPlacementMode.PLACE_AIR,
             BreachedStructureDefinition.TerrainValidation.LENIENT,
             BreachedStructureDefinition.HeightSelection.ORIGIN_SURFACE,
             16,
             BlockMirror.NONE,
             BlockRotation.NONE,
             BreachedStructureDefinition.SurfaceRequirement.ALLOW_WATER,
-            BreachedStructureDefinition.SupportMode.NONE,
-            Blocks.AIR,
-            Blocks.AIR,
-            0,
+            BreachedStructureDefinition.SupportMode.WATER_MARKER_PILLARS,
+            Blocks.DIRT,
+            Blocks.REINFORCED_DEEPSLATE,
+            96,
             BreachedStructureDefinition.PrePlacementCheck.NO_ACTIVE_NETHER_PORTAL_NEARBY
     );
 
