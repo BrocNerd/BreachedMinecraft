@@ -5,6 +5,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.BlockItem;
@@ -21,8 +22,10 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.GlobalPos;
 import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
+import net.minecraft.world.WorldProperties;
 import net.minecraft.world.border.WorldBorder;
 import net.minecraft.world.chunk.WorldChunk;
 import net.minecraft.world.dimension.DimensionOptions;
@@ -32,6 +35,7 @@ import net.minecraft.world.gen.chunk.ChunkGeneratorSettings;
 import net.minecraft.world.gen.chunk.NoiseChunkGenerator;
 import net.minecraft.world.gen.WorldPreset;
 import net.minecraft.world.gen.WorldPresets;
+import net.minecraft.world.level.ServerWorldProperties;
 import nrd.breached.Breached;
 
 import java.util.HashSet;
@@ -41,6 +45,8 @@ import java.util.Set;
 
 public final class BreachedDimensionRules {
     private static final double BORDER_CENTER = 0.0D;
+    private static final int SPAWN_SEARCH_RADIUS = 96;
+    private static final int SPAWN_SEARCH_STEP = 8;
     private static final int PORTAL_STRUCTURE_X_OFFSET = 0;
     private static final int PORTAL_STRUCTURE_Z_OFFSET = 0;
     private static final int PORTAL_ACTIVE_CHECK_RADIUS = 16;
@@ -86,6 +92,7 @@ public final class BreachedDimensionRules {
 
         if (world.getRegistryKey().equals(World.OVERWORLD)) {
             applyWorldBorder(world, rules.get().overworldBorderSize(), "Overworld", rules.get());
+            applyWorldSpawn(world, rules.get());
             logOfficialOverworldPortalCoordinates(world, rules.get());
         } else if (world.getRegistryKey().equals(World.NETHER)) {
             applyWorldBorder(world, rules.get().netherBorderSize(), "Nether", rules.get());
@@ -98,6 +105,57 @@ public final class BreachedDimensionRules {
         border.setSize(size);
 
         System.out.println("[Breached] Applied " + dimensionName + " world border for " + rules.presetId() + ": center 0,0 size " + (int) size + ".");
+    }
+
+    private static void applyWorldSpawn(ServerWorld world, PresetRules rules) {
+        BlockPos spawnPos = findSafeSpawnPos(world);
+        ((ServerWorldProperties) world.getLevelProperties()).setSpawnPoint(new WorldProperties.SpawnPoint(
+                GlobalPos.create(world.getRegistryKey(), spawnPos),
+                0.0F,
+                0.0F
+        ));
+        System.out.println("[Breached] Applied Overworld spawn for " + rules.presetId()
+                + ": x " + spawnPos.getX()
+                + ", y " + spawnPos.getY()
+                + ", z " + spawnPos.getZ() + ".");
+    }
+
+    private static BlockPos findSafeSpawnPos(ServerWorld world) {
+        BlockPos fallback = getSurfaceSpawnPos(world, 0, 0);
+        if (isSafeSpawnPos(world, fallback)) {
+            return fallback;
+        }
+
+        for (int radius = SPAWN_SEARCH_STEP; radius <= SPAWN_SEARCH_RADIUS; radius += SPAWN_SEARCH_STEP) {
+            for (int x = -radius; x <= radius; x += SPAWN_SEARCH_STEP) {
+                for (int z = -radius; z <= radius; z += SPAWN_SEARCH_STEP) {
+                    if (Math.abs(x) != radius && Math.abs(z) != radius) {
+                        continue;
+                    }
+
+                    BlockPos candidate = getSurfaceSpawnPos(world, x, z);
+                    if (isSafeSpawnPos(world, candidate)) {
+                        return candidate;
+                    }
+                }
+            }
+        }
+
+        return fallback;
+    }
+
+    private static BlockPos getSurfaceSpawnPos(ServerWorld world, int x, int z) {
+        int y = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+        return new BlockPos(x, y, z);
+    }
+
+    private static boolean isSafeSpawnPos(ServerWorld world, BlockPos pos) {
+        BlockState below = world.getBlockState(pos.down());
+        return !below.isAir()
+                && !below.isOf(Blocks.WATER)
+                && !below.isOf(Blocks.LAVA)
+                && world.getBlockState(pos).isAir()
+                && world.getBlockState(pos.up()).isAir();
     }
 
     private static void logOfficialOverworldPortalCoordinates(ServerWorld world, PresetRules rules) {

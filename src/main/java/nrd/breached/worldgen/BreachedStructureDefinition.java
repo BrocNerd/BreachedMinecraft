@@ -12,15 +12,20 @@ public record BreachedStructureDefinition(
         Identifier structureId,
         RegistryKey<World> requiredDimension,
         int countPerWorld,
+        int plannedCandidateCount,
         PlacementMode placementMode,
         int centerX,
         int centerZ,
+        int placementOffsetX,
+        int placementOffsetY,
+        int placementOffsetZ,
         int minRadius,
         int maxRadius,
         boolean roughlyOpposed,
         long seedSalt,
         int protectionRadius,
-        int spacingFromOtherBreachedStructures,
+        int preferredSpacingFromBreachedStructures,
+        int minimumSpacingFromBreachedStructures,
         boolean avoidTrees,
         boolean avoidWater,
         boolean avoidSteepSlopes,
@@ -31,6 +36,12 @@ public record BreachedStructureDefinition(
         boolean protectedStructure,
         boolean waitForPlayers,
         int priority,
+        SpawnImportance spawnImportance,
+        SpacingGroup spacingGroup,
+        SpacingPolicy spacingPolicy,
+        int maxVegetationObstruction,
+        int maxSolidObstruction,
+        AirPlacementMode airPlacementMode,
         TerrainValidation terrainValidation,
         HeightSelection heightSelection,
         int sampleStep,
@@ -80,29 +91,62 @@ public record BreachedStructureDefinition(
         NO_ACTIVE_NETHER_PORTAL_NEARBY
     }
 
+    public enum SpawnImportance {
+        REQUIRED,
+        OPTIONAL
+    }
+
+    public enum SpacingGroup {
+        MAJOR,
+        MINOR
+    }
+
+    public enum SpacingPolicy {
+        NONE,
+        SAME_STRUCTURE,
+        SAME_GROUP,
+        MAJOR_ONLY,
+        ALL_BREACHED
+    }
+
+    public enum AirPlacementMode {
+        PLACE_AIR,
+        IGNORE_AIR
+    }
+
     public int protectionRadiusSquared() {
         return protectionRadius * protectionRadius;
     }
 
     public BreachedStructureDefinition withRadius(int minRadius, int maxRadius) {
-        return withRadiusAndSpacing(minRadius, maxRadius, spacingFromOtherBreachedStructures);
+        return withRadiusAndSpacing(minRadius, maxRadius, preferredSpacingFromBreachedStructures, minimumSpacingFromBreachedStructures);
     }
 
-    public BreachedStructureDefinition withRadiusAndSpacing(int minRadius, int maxRadius, int spacingFromOtherBreachedStructures) {
+    public BreachedStructureDefinition withRadiusAndSpacing(
+            int minRadius,
+            int maxRadius,
+            int preferredSpacingFromBreachedStructures,
+            int minimumSpacingFromBreachedStructures
+    ) {
         return new BreachedStructureDefinition(
                 logName,
                 structureId,
                 requiredDimension,
                 countPerWorld,
+                plannedCandidateCount,
                 placementMode,
                 centerX,
                 centerZ,
+                placementOffsetX,
+                placementOffsetY,
+                placementOffsetZ,
                 minRadius,
                 maxRadius,
                 roughlyOpposed,
                 seedSalt,
                 protectionRadius,
-                spacingFromOtherBreachedStructures,
+                preferredSpacingFromBreachedStructures,
+                minimumSpacingFromBreachedStructures,
                 avoidTrees,
                 avoidWater,
                 avoidSteepSlopes,
@@ -113,6 +157,12 @@ public record BreachedStructureDefinition(
                 protectedStructure,
                 waitForPlayers,
                 priority,
+                spawnImportance,
+                spacingGroup,
+                spacingPolicy,
+                maxVegetationObstruction,
+                maxSolidObstruction,
+                airPlacementMode,
                 terrainValidation,
                 heightSelection,
                 sampleStep,
