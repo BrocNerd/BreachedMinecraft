@@ -51,7 +51,7 @@ public final class BreachedStructureDefinitions {
             16,
             BlockMirror.NONE,
             BlockRotation.NONE,
-            BreachedStructureDefinition.SurfaceRequirement.MOSTLY_WATER,
+            BreachedStructureDefinition.SurfaceRequirement.ALLOW_WATER,
             BreachedStructureDefinition.SupportMode.WATER_MARKER_PILLARS,
             Blocks.DEEPSLATE_BRICKS,
             Blocks.REINFORCED_DEEPSLATE,
@@ -69,7 +69,7 @@ public final class BreachedStructureDefinitions {
             0,
             0,
             0,
-            0,
+            -1,
             0,
             450,
             1000,
@@ -101,7 +101,7 @@ public final class BreachedStructureDefinitions {
             BlockRotation.NONE,
             BreachedStructureDefinition.SurfaceRequirement.ALLOW_WATER,
             BreachedStructureDefinition.SupportMode.WATER_MARKER_PILLARS,
-            Blocks.DIRT,
+            Blocks.STONE_BRICKS,
             Blocks.REINFORCED_DEEPSLATE,
             96,
             BreachedStructureDefinition.PrePlacementCheck.NO_ACTIVE_NETHER_PORTAL_NEARBY
@@ -203,11 +203,121 @@ public final class BreachedStructureDefinitions {
             BreachedStructureDefinition.PrePlacementCheck.NONE
     );
 
+    public static final BreachedStructureDefinition ABANDONED_HUT = new BreachedStructureDefinition(
+            "abandonedhut.nbt",
+            Identifier.of(Breached.MOD_ID, "abandonedhut"),
+            World.OVERWORLD,
+            12,
+            0,
+            BreachedStructureDefinition.PlacementMode.RANDOM_WITHIN_BORDER,
+            0,
+            0,
+            0,
+            -1,
+            0,
+            64,
+            1200,
+            false,
+            0x6E2D9B4C18F05A77L,
+            0,
+            96,
+            48,
+            true,
+            true,
+            true,
+            true,
+            false,
+            true,
+            false,
+            false,
+            true,
+            1,
+            BreachedStructureDefinition.SpawnImportance.OPTIONAL,
+            BreachedStructureDefinition.SpacingGroup.MINOR,
+            BreachedStructureDefinition.SpacingPolicy.SAME_STRUCTURE,
+            8,
+            2,
+            BreachedStructureDefinition.AirPlacementMode.IGNORE_AIR,
+            BreachedStructureDefinition.TerrainValidation.MEDIUM,
+            BreachedStructureDefinition.HeightSelection.MEDIAN_SURFACE,
+            4,
+            BlockMirror.NONE,
+            BlockRotation.NONE,
+            BreachedStructureDefinition.SurfaceRequirement.AVOID_WATER,
+            BreachedStructureDefinition.SupportMode.WATER_SOLID_FOOTPRINT,
+            Blocks.DIRT,
+            Blocks.AIR,
+            6,
+            BreachedStructureDefinition.PrePlacementCheck.NONE
+    );
+
+    public static final BreachedStructureDefinition CADEN_BOAT = new BreachedStructureDefinition(
+            "cadenboat.nbt",
+            Identifier.of(Breached.MOD_ID, "cadenboat"),
+            World.OVERWORLD,
+            20,
+            0,
+            BreachedStructureDefinition.PlacementMode.RANDOM_WITHIN_BORDER,
+            0,
+            0,
+            0,
+            0,
+            0,
+            64,
+            1200,
+            false,
+            0x2A91D64F7C03B5E8L,
+            0,
+            96,
+            48,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            1,
+            BreachedStructureDefinition.SpawnImportance.OPTIONAL,
+            BreachedStructureDefinition.SpacingGroup.MINOR,
+            BreachedStructureDefinition.SpacingPolicy.SAME_STRUCTURE,
+            0,
+            0,
+            BreachedStructureDefinition.AirPlacementMode.IGNORE_AIR,
+            BreachedStructureDefinition.TerrainValidation.LENIENT,
+            BreachedStructureDefinition.HeightSelection.MEDIAN_SURFACE,
+            4,
+            BlockMirror.NONE,
+            BlockRotation.NONE,
+            BreachedStructureDefinition.SurfaceRequirement.REQUIRE_WATER,
+            BreachedStructureDefinition.SupportMode.NONE,
+            Blocks.AIR,
+            Blocks.AIR,
+            0,
+            BreachedStructureDefinition.PrePlacementCheck.NONE
+    );
+
     public static final List<BreachedStructureDefinition> PLANNED_STRUCTURES = List.of(
             SWORD_STATUE,
             OFFICIAL_NETHER_PORTAL,
             HORACE,
             PINK_TREE
+    );
+
+    public static final List<BreachedStructureDefinition> MINOR_POI_STRUCTURES = List.of(
+            ABANDONED_HUT,
+            CADEN_BOAT
+    );
+
+    public static final List<BreachedStructureDefinition> ALL_STRUCTURES = List.of(
+            SWORD_STATUE,
+            OFFICIAL_NETHER_PORTAL,
+            HORACE,
+            PINK_TREE,
+            ABANDONED_HUT,
+            CADEN_BOAT
     );
 
     public static final List<BreachedStructureDefinition> PROTECTED_STRUCTURES = List.of(
@@ -248,6 +358,18 @@ public final class BreachedStructureDefinitions {
                 && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
                 && definition.structureId().equals(OFFICIAL_NETHER_PORTAL.structureId())) {
             return definition.withRadiusAndSpacing(200, 250, 300, 150);
+        }
+
+        if (preset.isPresent()
+                && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
+                && definition.structureId().equals(ABANDONED_HUT.structureId())) {
+            return definition.withRadiusAndSpacing(48, 425, 96, 48);
+        }
+
+        if (preset.isPresent()
+                && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
+                && definition.structureId().equals(CADEN_BOAT.structureId())) {
+            return definition.withCountPerWorld(6).withRadiusAndSpacing(48, 425, 96, 48);
         }
 
         return definition;

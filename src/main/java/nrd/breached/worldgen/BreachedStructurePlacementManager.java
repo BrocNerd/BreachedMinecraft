@@ -31,19 +31,33 @@ import java.util.Optional;
 import java.util.Set;
 
 public final class BreachedStructurePlacementManager {
+    private static final int CHUNK_SIZE = 16;
     private static final int PORTAL_ACTIVE_CHECK_RADIUS = 16;
     private static final int REQUIRED_CHUNK_LOADS_PER_TICK = 1;
     private static final int MAX_FORCED_CHUNK_TICKS = 200;
+    private static final int MINOR_POI_CHANCE_DIVISOR = 10;
+    private static final int MINOR_POI_LOCAL_CANDIDATES_PER_CHUNK = 6;
+    private static final int MINOR_POI_CHUNK_INSET = 2;
+    private static final int MINOR_POI_PLAYER_SCAN_INTERVAL_TICKS = 200;
+    private static final int MINOR_POI_PLAYER_SCAN_RADIUS_CHUNKS = 2;
+    private static final int MINOR_POI_PENDING_CHUNKS_PER_TICK = 2;
     private static final Set<PendingStructurePlacement> PENDING_PLACEMENTS = new HashSet<>();
     private static final Set<ForcedStructureChunk> FORCED_CHUNKS = new HashSet<>();
+    private static final Set<PendingMinorPoiChunk> PENDING_MINOR_POI_CHUNKS = new HashSet<>();
 
     private BreachedStructurePlacementManager() {
     }
 
     public static void register() {
-        ServerChunkEvents.CHUNK_LOAD.register(BreachedStructurePlacementManager::enqueuePlannedStructures);
+        ServerChunkEvents.CHUNK_LOAD.register(BreachedStructurePlacementManager::handleChunkLoad);
         ServerTickEvents.END_WORLD_TICK.register(BreachedStructurePlacementManager::placePendingStructures);
         registerProtectionEvents();
+    }
+
+    private static void handleChunkLoad(ServerWorld world, WorldChunk chunk) {
+        enqueuePlannedStructures(world, chunk);
+        ChunkPos chunkPos = chunk.getPos();
+        PENDING_MINOR_POI_CHUNKS.add(new PendingMinorPoiChunk(world.getSeed(), chunkPos.x, chunkPos.z));
     }
 
     private static void enqueuePlannedStructures(ServerWorld world, WorldChunk chunk) {
@@ -84,6 +98,8 @@ public final class BreachedStructurePlacementManager {
         reservePlannedStructures(world, state);
         forceLoadRequiredReservedChunks(world, state);
         releaseCompletedForcedChunks(world, state);
+        tryPlacePendingMinorPoiChunks(world, state);
+        tryPlaceMinorPoisNearPlayers(world, state);
 
         if (PENDING_PLACEMENTS.isEmpty()) {
             return;
@@ -127,6 +143,239 @@ public final class BreachedStructurePlacementManager {
                             + " planned candidates for " + structureKey + ".");
                 }
             }
+        }
+    }
+
+    private static MinorPoiAttemptResult tryPlaceMinorPoisInChunk(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            ChunkPos chunkPos
+    ) {
+        if (!world.isChunkLoaded(chunkPos.x, chunkPos.z)) {
+            return MinorPoiAttemptResult.NOT_READY;
+        }
+
+        for (BreachedStructureDefinition definition : BreachedStructureDefinitions.MINOR_POI_STRUCTURES) {
+            BreachedStructureDefinition activeDefinition = getActiveDefinition(world, definition);
+            if (!world.getRegistryKey().equals(activeDefinition.requiredDimension())) {
+                continue;
+            }
+
+            String structureKey = BreachedStructureDefinitions.key(activeDefinition);
+            if (countPlacedStructures(state, structureKey) >= activeDefinition.countPerWorld()) {
+                continue;
+            }
+
+            int candidateIndex = minorCandidateIndex(chunkPos);
+            String placementKey = placementKey(structureKey, candidateIndex);
+            if (state.hasPlacement(placementKey) || state.hasFailedCandidate(structureKey, candidateIndex)) {
+                continue;
+            }
+
+            java.util.Random random = createMinorPoiRandom(world.getSeed(), activeDefinition, chunkPos);
+            if (random.nextInt(MINOR_POI_CHANCE_DIVISOR) != 0) {
+                continue;
+            }
+
+            Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, activeDefinition);
+            if (template.isEmpty()) {
+                continue;
+            }
+
+            MinorPoiAttemptResult result = placeMinorPoiInChunk(
+                    world,
+                    state,
+                    activeDefinition,
+                    structureKey,
+                    placementKey,
+                    candidateIndex,
+                    template.get(),
+                    chunkPos,
+                    random
+            );
+            if (result == MinorPoiAttemptResult.FAILED) {
+                state.markCandidateFailed(structureKey, candidateIndex);
+                continue;
+            }
+
+            if (result == MinorPoiAttemptResult.PLACED || result == MinorPoiAttemptResult.NOT_READY) {
+                return result;
+            }
+        }
+
+        return MinorPoiAttemptResult.FAILED;
+    }
+
+    private static void tryPlacePendingMinorPoiChunks(ServerWorld world, BreachedStructurePlacementState state) {
+        int attempted = 0;
+        for (PendingMinorPoiChunk pendingChunk : new HashSet<>(PENDING_MINOR_POI_CHUNKS)) {
+            if (pendingChunk.worldSeed() != world.getSeed()) {
+                continue;
+            }
+
+            if (attempted >= MINOR_POI_PENDING_CHUNKS_PER_TICK) {
+                break;
+            }
+
+            ChunkPos chunkPos = new ChunkPos(pendingChunk.chunkX(), pendingChunk.chunkZ());
+            MinorPoiAttemptResult result = tryPlaceMinorPoisInChunk(world, state, chunkPos);
+            if (result != MinorPoiAttemptResult.NOT_READY) {
+                PENDING_MINOR_POI_CHUNKS.remove(pendingChunk);
+            }
+
+            attempted++;
+        }
+    }
+
+    private static void tryPlaceMinorPoisNearPlayers(ServerWorld world, BreachedStructurePlacementState state) {
+        if (world.getTime() % MINOR_POI_PLAYER_SCAN_INTERVAL_TICKS != 0 || world.getPlayers().isEmpty()) {
+            return;
+        }
+
+        for (PlayerEntity player : world.getPlayers()) {
+            ChunkPos playerChunk = player.getChunkPos();
+            for (int xOffset = -MINOR_POI_PLAYER_SCAN_RADIUS_CHUNKS; xOffset <= MINOR_POI_PLAYER_SCAN_RADIUS_CHUNKS; xOffset++) {
+                for (int zOffset = -MINOR_POI_PLAYER_SCAN_RADIUS_CHUNKS; zOffset <= MINOR_POI_PLAYER_SCAN_RADIUS_CHUNKS; zOffset++) {
+                    ChunkPos chunkPos = new ChunkPos(playerChunk.x + xOffset, playerChunk.z + zOffset);
+                    if (!world.isChunkLoaded(chunkPos.x, chunkPos.z)) {
+                        continue;
+                    }
+
+                    MinorPoiAttemptResult result = tryPlaceMinorPoisInChunk(world, state, chunkPos);
+                    if (result == MinorPoiAttemptResult.PLACED) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    private static MinorPoiAttemptResult placeMinorPoiInChunk(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            BreachedStructureDefinition definition,
+            String structureKey,
+            String placementKey,
+            int candidateIndex,
+            StructureTemplate template,
+            ChunkPos chunkPos,
+            java.util.Random random
+    ) {
+        Vec3i footprintSize = BreachedStructureSpawnManager.getRotatedSize(template.getSize(), definition.rotation());
+        boolean skippedUnloadedFootprint = false;
+        for (int attempt = 0; attempt < MINOR_POI_LOCAL_CANDIDATES_PER_CHUNK; attempt++) {
+            int x = chunkPos.x * CHUNK_SIZE + MINOR_POI_CHUNK_INSET + random.nextInt(CHUNK_SIZE - (MINOR_POI_CHUNK_INSET * 2));
+            int z = chunkPos.z * CHUNK_SIZE + MINOR_POI_CHUNK_INSET + random.nextInt(CHUNK_SIZE - (MINOR_POI_CHUNK_INSET * 2));
+            if (!isInsideDefinitionRadius(definition, x, z)) {
+                continue;
+            }
+
+            BreachedStructureSpawnManager.RadiusCandidate candidate = new BreachedStructureSpawnManager.RadiusCandidate(
+                    candidateIndex,
+                    x,
+                    z,
+                    distanceFromDefinitionCenter(definition, x, z),
+                    0.0D
+            );
+            SpacingEvaluation spacing = evaluateSpacing(state, definition, structureKey, placementKey, candidate);
+            if (!spacing.accepted()) {
+                continue;
+            }
+
+            int originX = getPlacementOriginX(definition, candidate);
+            int originZ = getPlacementOriginZ(definition, candidate);
+            if (!isFootprintLoaded(world, originX, originZ, footprintSize)) {
+                skippedUnloadedFootprint = true;
+                continue;
+            }
+
+            BreachedStructureSite site = BreachedStructureSpawnManager.evaluateSite(
+                    world,
+                    definition,
+                    template,
+                    originX,
+                    originZ,
+                    candidate.radius()
+            );
+            if (!site.accepted()) {
+                continue;
+            }
+
+            ObstructionEvaluation obstruction = evaluateObstruction(world, definition, footprintSize, site);
+            if (!obstruction.accepted()) {
+                continue;
+            }
+
+            BreachedStructurePlacement placement = BreachedStructureSpawnManager.place(
+                    world,
+                    definition,
+                    template,
+                    originX,
+                    getPlacementOriginY(world, definition, candidate),
+                    originZ,
+                    definition.mirror(),
+                    definition.rotation(),
+                    site
+            );
+            BreachedStructureSupportGenerator.generate(world, definition, placement);
+            clearNaturalBlocksAboveStructure(world, definition, placement);
+            state.markPlaced(placementKey, placement, world.getTime());
+            System.out.println("[Breached] Placed minor POI " + definition.logName()
+                    + " from chunk " + chunkPos.x + ", " + chunkPos.z
+                    + " at x " + placement.origin().getX()
+                    + ", y " + placement.origin().getY()
+                    + ", z " + placement.origin().getZ() + ".");
+            return MinorPoiAttemptResult.PLACED;
+        }
+
+        return skippedUnloadedFootprint ? MinorPoiAttemptResult.NOT_READY : MinorPoiAttemptResult.FAILED;
+    }
+
+    private static void clearNaturalBlocksAboveStructure(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacement placement
+    ) {
+        if (!definition.canClearBlocks()) {
+            return;
+        }
+
+        BlockPos origin = placement.origin();
+        int minY = origin.getY();
+        int structureMaxY = Math.min(world.getTopYInclusive(), origin.getY() + placement.size().getY() - 1);
+        int clearedBlocks = 0;
+
+        for (int x = origin.getX(); x < origin.getX() + placement.size().getX(); x++) {
+            for (int z = origin.getZ(); z < origin.getZ() + placement.size().getZ(); z++) {
+                int highestStructureY = Integer.MIN_VALUE;
+                for (int y = minY; y <= structureMaxY; y++) {
+                    BlockState state = world.getBlockState(new BlockPos(x, y, z));
+                    if (isStructureClearanceAnchor(state)) {
+                        highestStructureY = y;
+                    }
+                }
+
+                if (highestStructureY == Integer.MIN_VALUE) {
+                    continue;
+                }
+
+                int clearMaxY = Math.min(world.getTopYInclusive(), highestStructureY + 5);
+                for (int y = highestStructureY + 1; y <= clearMaxY; y++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    if (!isNaturalSurfaceObstruction(state)) {
+                        continue;
+                    }
+
+                    world.setBlockState(pos, Blocks.AIR.getDefaultState(), 2);
+                    clearedBlocks++;
+                }
+            }
+        }
+
+        if (clearedBlocks > 0) {
+            System.out.println("[Breached] Cleared " + clearedBlocks
+                    + " natural surface obstruction blocks above placed blocks in " + placement.logName() + ".");
         }
     }
 
@@ -360,7 +609,7 @@ public final class BreachedStructurePlacementManager {
                 site
         );
         BreachedStructureSupportGenerator.generate(world, definition, placement);
-        state.markPlaced(placementKey, placement);
+        state.markPlaced(placementKey, placement, world.getTime());
         System.out.println("[Breached] Registered protected structure " + definition.logName()
                 + " around x " + BreachedStructureSpawnManager.getProtectedCenterX(placement)
                 + ", z " + BreachedStructureSpawnManager.getProtectedCenterZ(placement)
@@ -425,7 +674,88 @@ public final class BreachedStructurePlacementManager {
         return candidate.z() + definition.placementOffsetZ();
     }
 
+    private static java.util.Random createMinorPoiRandom(
+            long worldSeed,
+            BreachedStructureDefinition definition,
+            ChunkPos chunkPos
+    ) {
+        long seed = worldSeed
+                ^ definition.seedSalt()
+                ^ ((long) chunkPos.x * 341873128712L)
+                ^ ((long) chunkPos.z * 132897987541L);
+        return new java.util.Random(seed);
+    }
+
+    private static int minorCandidateIndex(ChunkPos chunkPos) {
+        return (chunkPos.x & 0xFFFF) << 16 | (chunkPos.z & 0xFFFF);
+    }
+
+    private static boolean isInsideDefinitionRadius(BreachedStructureDefinition definition, int x, int z) {
+        long xDistance = x - definition.centerX();
+        long zDistance = z - definition.centerZ();
+        long distanceSquared = xDistance * xDistance + zDistance * zDistance;
+        return distanceSquared >= (long) definition.minRadius() * definition.minRadius()
+                && distanceSquared <= (long) definition.maxRadius() * definition.maxRadius();
+    }
+
+    private static int distanceFromDefinitionCenter(BreachedStructureDefinition definition, int x, int z) {
+        long xDistance = x - definition.centerX();
+        long zDistance = z - definition.centerZ();
+        return (int) Math.round(Math.sqrt(xDistance * xDistance + zDistance * zDistance));
+    }
+
+    private static boolean isFootprintLoaded(ServerWorld world, int originX, int originZ, Vec3i footprintSize) {
+        int minChunkX = Math.floorDiv(originX, CHUNK_SIZE);
+        int minChunkZ = Math.floorDiv(originZ, CHUNK_SIZE);
+        int maxChunkX = Math.floorDiv(originX + footprintSize.getX() - 1, CHUNK_SIZE);
+        int maxChunkZ = Math.floorDiv(originZ + footprintSize.getZ() - 1, CHUNK_SIZE);
+
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                if (!world.isChunkLoaded(chunkX, chunkZ)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
     private static List<BreachedStructureSpawnManager.RadiusCandidate> generatePlannedCandidates(
+            ServerWorld world,
+            BreachedStructureDefinition definition
+    ) {
+        if (definition.structureId().equals(BreachedStructureDefinitions.SWORD_STATUE.structureId())) {
+            return generateSwordStatueCandidatesOpposedToPinkTree(world, definition);
+        }
+
+        return generateRadiusCandidates(world, definition);
+    }
+
+    private static List<BreachedStructureSpawnManager.RadiusCandidate> generateSwordStatueCandidatesOpposedToPinkTree(
+            ServerWorld world,
+            BreachedStructureDefinition definition
+    ) {
+        BreachedStructureDefinition pinkTreeDefinition = getActiveDefinition(world, BreachedStructureDefinitions.PINK_TREE);
+        List<BreachedStructureSpawnManager.RadiusCandidate> pinkTreeCandidates = generateRadiusCandidates(world, pinkTreeDefinition);
+        List<BreachedStructureSpawnManager.RadiusCandidate> swordCandidates = new ArrayList<>();
+
+        for (BreachedStructureSpawnManager.RadiusCandidate pinkTreeCandidate : pinkTreeCandidates) {
+            int x = definition.centerX() - (pinkTreeCandidate.x() - definition.centerX());
+            int z = definition.centerZ() - (pinkTreeCandidate.z() - definition.centerZ());
+            swordCandidates.add(new BreachedStructureSpawnManager.RadiusCandidate(
+                    pinkTreeCandidate.index(),
+                    x,
+                    z,
+                    distanceFromDefinitionCenter(definition, x, z),
+                    pinkTreeCandidate.angle() + Math.PI
+            ));
+        }
+
+        return swordCandidates;
+    }
+
+    private static List<BreachedStructureSpawnManager.RadiusCandidate> generateRadiusCandidates(
             ServerWorld world,
             BreachedStructureDefinition definition
     ) {
@@ -546,6 +876,7 @@ public final class BreachedStructurePlacementManager {
 
             if (state.hasPlacement(reservation.getKey())
                     || state.hasFailedCandidate(reservation.getValue().structureKey(), reservation.getValue().candidateIndex())
+                    || !isPlannedStructureKey(reservation.getValue().structureKey())
                     || !shouldCheckSpacingAgainst(definition, structureKey, reservation.getValue().structureKey())) {
                 continue;
             }
@@ -589,9 +920,14 @@ public final class BreachedStructurePlacementManager {
     }
 
     private static Optional<BreachedStructureDefinition> getBaseDefinition(String structureKey) {
-        return BreachedStructureDefinitions.PLANNED_STRUCTURES.stream()
+        return BreachedStructureDefinitions.ALL_STRUCTURES.stream()
                 .filter(definition -> BreachedStructureDefinitions.key(definition).equals(structureKey))
                 .findFirst();
+    }
+
+    private static boolean isPlannedStructureKey(String structureKey) {
+        return BreachedStructureDefinitions.PLANNED_STRUCTURES.stream()
+                .anyMatch(definition -> BreachedStructureDefinitions.key(definition).equals(structureKey));
     }
 
     private static ObstructionEvaluation evaluateObstruction(
@@ -648,6 +984,30 @@ public final class BreachedStructurePlacementManager {
                 || state.isOf(Blocks.LARGE_FERN)
                 || state.isOf(Blocks.VINE)
                 || state.isOf(Blocks.SHORT_GRASS);
+    }
+
+    private static boolean isNaturalSurfaceObstruction(BlockState state) {
+        return state.isOf(Blocks.GRASS_BLOCK)
+                || state.isOf(Blocks.DIRT)
+                || state.isOf(Blocks.COARSE_DIRT)
+                || state.isOf(Blocks.ROOTED_DIRT)
+                || state.isOf(Blocks.PODZOL)
+                || state.isOf(Blocks.MYCELIUM)
+                || state.isOf(Blocks.DIRT_PATH)
+                || state.isOf(Blocks.FARMLAND)
+                || state.isOf(Blocks.MOSS_BLOCK)
+                || state.isOf(Blocks.SNOW)
+                || state.isOf(Blocks.TALL_GRASS)
+                || state.isOf(Blocks.FERN)
+                || state.isOf(Blocks.LARGE_FERN)
+                || state.isOf(Blocks.SHORT_GRASS);
+    }
+
+    private static boolean isStructureClearanceAnchor(BlockState state) {
+        return !state.isAir()
+                && !state.isOf(Blocks.WATER)
+                && !state.isOf(Blocks.LAVA)
+                && !isNaturalSurfaceObstruction(state);
     }
 
     private static boolean hasActivePortal(ServerWorld world, int centerX, int centerZ) {
@@ -761,6 +1121,9 @@ public final class BreachedStructurePlacementManager {
     ) {
     }
 
+    private record PendingMinorPoiChunk(long worldSeed, int chunkX, int chunkZ) {
+    }
+
     private record ForcedStructureChunk(
             long worldSeed,
             String structureKey,
@@ -791,6 +1154,12 @@ public final class BreachedStructurePlacementManager {
         HANDLED,
         FAILED,
         SKIPPED
+    }
+
+    private enum MinorPoiAttemptResult {
+        PLACED,
+        FAILED,
+        NOT_READY
     }
 
     private record ReservationChoice(

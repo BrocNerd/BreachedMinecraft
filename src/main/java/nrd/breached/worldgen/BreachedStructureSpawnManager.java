@@ -224,6 +224,12 @@ public final class BreachedStructureSpawnManager {
         }
 
         int heightRange = maxY - minY;
+        int maxAllowedHeightRange = getMaxAllowedHeightRange(definition);
+        if (maxAllowedHeightRange >= 0 && heightRange > maxAllowedHeightRange) {
+            return new BreachedStructureSite(originX, originZ, 0, minY, maxY, heightRange, Integer.MAX_VALUE,
+                    "height range " + heightRange + " exceeded max " + maxAllowedHeightRange);
+        }
+
         int score = heightRange * 100_000 + distanceScore;
         int surfaceY = switch (definition.heightSelection()) {
             case ORIGIN_SURFACE -> getSurfaceY(world, originX, originZ);
@@ -308,6 +314,18 @@ public final class BreachedStructureSpawnManager {
     private static int getMedianSurfaceY(List<Integer> surfaceHeights) {
         surfaceHeights.sort(Integer::compareTo);
         return surfaceHeights.get(surfaceHeights.size() / 2);
+    }
+
+    private static int getMaxAllowedHeightRange(BreachedStructureDefinition definition) {
+        if (!definition.needsFlatGround()) {
+            return -1;
+        }
+
+        return switch (definition.terrainValidation()) {
+            case LENIENT -> -1;
+            case MEDIUM -> 4;
+            case STRICT -> 2;
+        };
     }
 
     private static List<Integer> createSamples(int start, int end, int sampleStep) {

@@ -22,6 +22,7 @@ public class BreachedStructurePlacementState extends PersistentState {
     private static final String ORIGIN_X_KEY = "origin_x";
     private static final String ORIGIN_Y_KEY = "origin_y";
     private static final String ORIGIN_Z_KEY = "origin_z";
+    private static final String PLACED_TIME_KEY = "placed_time";
     private static final String STRUCTURE_KEY = "structure_key";
     private static final String CANDIDATE_INDEX_KEY = "candidate_index";
     private static final String X_KEY = "x";
@@ -84,18 +85,23 @@ public class BreachedStructurePlacementState extends PersistentState {
     }
 
     public void markPlaced(String key, BreachedStructurePlacement placement) {
+        markPlaced(key, placement, 0L);
+    }
+
+    public void markPlaced(String key, BreachedStructurePlacement placement, long placedTime) {
         placements.put(key, new SavedPlacement(
                 BreachedStructureSpawnManager.getProtectedCenterX(placement),
                 BreachedStructureSpawnManager.getProtectedCenterZ(placement),
                 placement.origin().getX(),
                 placement.origin().getY(),
-                placement.origin().getZ()
+                placement.origin().getZ(),
+                placedTime
         ));
         markDirty();
     }
 
     public void markPlaced(String key, int centerX, int centerZ) {
-        placements.put(key, new SavedPlacement(centerX, centerZ, centerX, 0, centerZ));
+        placements.put(key, new SavedPlacement(centerX, centerZ, centerX, 0, centerZ, 0L));
         markDirty();
     }
 
@@ -113,6 +119,7 @@ public class BreachedStructurePlacementState extends PersistentState {
             placementNbt.putInt(ORIGIN_X_KEY, placement.originX());
             placementNbt.putInt(ORIGIN_Y_KEY, placement.originY());
             placementNbt.putInt(ORIGIN_Z_KEY, placement.originZ());
+            placementNbt.putLong(PLACED_TIME_KEY, placement.placedTime());
             placementRoot.put(entry.getKey(), placementNbt);
         }
 
@@ -156,7 +163,8 @@ public class BreachedStructurePlacementState extends PersistentState {
                         placementNbt.get().getInt(CENTER_Z_KEY, 0),
                         placementNbt.get().getInt(ORIGIN_X_KEY, 0),
                         placementNbt.get().getInt(ORIGIN_Y_KEY, 0),
-                        placementNbt.get().getInt(ORIGIN_Z_KEY, 0)
+                        placementNbt.get().getInt(ORIGIN_Z_KEY, 0),
+                        placementNbt.get().getLong(PLACED_TIME_KEY, 0L)
                 ));
             }
         }
@@ -201,7 +209,7 @@ public class BreachedStructurePlacementState extends PersistentState {
         return state;
     }
 
-    public record SavedPlacement(int centerX, int centerZ, int originX, int originY, int originZ) {
+    public record SavedPlacement(int centerX, int centerZ, int originX, int originY, int originZ, long placedTime) {
     }
 
     public record ReservedPlacement(String structureKey, int candidateIndex, int x, int z) {

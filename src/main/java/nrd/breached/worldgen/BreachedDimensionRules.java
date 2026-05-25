@@ -31,8 +31,9 @@ import java.util.Optional;
 
 public final class BreachedDimensionRules {
     private static final double BORDER_CENTER = 0.0D;
-    private static final int SPAWN_SEARCH_RADIUS = 96;
     private static final int SPAWN_SEARCH_STEP = 8;
+    private static final int SPAWN_BORDER_MARGIN = 48;
+    private static final int SPAWN_PLATFORM_RADIUS = 3;
     private static final PresetRules STANDARD_BREACHED_ISLAND = new PresetRules(
             BreachedPreset.STANDARD,
             RegistryKey.of(RegistryKeys.WORLD_PRESET, Identifier.of(Breached.MOD_ID, "breached_island")),
@@ -85,7 +86,7 @@ public final class BreachedDimensionRules {
     }
 
     private static void applyWorldSpawn(ServerWorld world, PresetRules rules) {
-        BlockPos spawnPos = findSafeSpawnPos(world);
+        BlockPos spawnPos = findSafeSpawnPos(world, rules);
         ((ServerWorldProperties) world.getLevelProperties()).setSpawnPoint(new WorldProperties.SpawnPoint(
                 GlobalPos.create(world.getRegistryKey(), spawnPos),
                 0.0F,
@@ -97,13 +98,14 @@ public final class BreachedDimensionRules {
                 + ", z " + spawnPos.getZ() + ".");
     }
 
-    private static BlockPos findSafeSpawnPos(ServerWorld world) {
+    private static BlockPos findSafeSpawnPos(ServerWorld world, PresetRules rules) {
+        int maxSearchRadius = getSpawnSearchRadius(rules);
         BlockPos fallback = getSurfaceSpawnPos(world, 0, 0);
-        if (isSafeSpawnPos(world, fallback)) {
+        if (isInsideSpawnBorder(fallback, rules) && isSafeSpawnPos(world, fallback)) {
             return fallback;
         }
 
-        for (int radius = SPAWN_SEARCH_STEP; radius <= SPAWN_SEARCH_RADIUS; radius += SPAWN_SEARCH_STEP) {
+        for (int radius = SPAWN_SEARCH_STEP; radius <= maxSearchRadius; radius += SPAWN_SEARCH_STEP) {
             for (int x = -radius; x <= radius; x += SPAWN_SEARCH_STEP) {
                 for (int z = -radius; z <= radius; z += SPAWN_SEARCH_STEP) {
                     if (Math.abs(x) != radius && Math.abs(z) != radius) {
@@ -111,14 +113,23 @@ public final class BreachedDimensionRules {
                     }
 
                     BlockPos candidate = getSurfaceSpawnPos(world, x, z);
-                    if (isSafeSpawnPos(world, candidate)) {
+                    if (isInsideSpawnBorder(candidate, rules) && isSafeSpawnPos(world, candidate)) {
                         return candidate;
                     }
                 }
             }
         }
 
-        return fallback;
+        return createFallbackSpawnPlatform(world);
+    }
+
+    private static int getSpawnSearchRadius(PresetRules rules) {
+        return Math.max(SPAWN_SEARCH_STEP, (int) (rules.overworldBorderSize() / 2.0D) - SPAWN_BORDER_MARGIN);
+    }
+
+    private static boolean isInsideSpawnBorder(BlockPos pos, PresetRules rules) {
+        int maxCoordinate = getSpawnSearchRadius(rules);
+        return Math.abs(pos.getX()) <= maxCoordinate && Math.abs(pos.getZ()) <= maxCoordinate;
     }
 
     private static BlockPos getSurfaceSpawnPos(ServerWorld world, int x, int z) {
@@ -133,6 +144,23 @@ public final class BreachedDimensionRules {
                 && !below.isOf(Blocks.LAVA)
                 && world.getBlockState(pos).isAir()
                 && world.getBlockState(pos.up()).isAir();
+    }
+
+    private static BlockPos createFallbackSpawnPlatform(ServerWorld world) {
+        BlockPos surfacePos = getSurfaceSpawnPos(world, 0, 0);
+        int platformY = Math.max(world.getSeaLevel() + 1, surfacePos.getY());
+        BlockPos spawnPos = new BlockPos(0, platformY + 1, 0);
+
+        for (int x = -SPAWN_PLATFORM_RADIUS; x <= SPAWN_PLATFORM_RADIUS; x++) {
+            for (int z = -SPAWN_PLATFORM_RADIUS; z <= SPAWN_PLATFORM_RADIUS; z++) {
+                world.setBlockState(new BlockPos(x, platformY, z), Blocks.GRASS_BLOCK.getDefaultState(), 2);
+            }
+        }
+
+        world.setBlockState(spawnPos, Blocks.AIR.getDefaultState(), 2);
+        world.setBlockState(spawnPos.up(), Blocks.AIR.getDefaultState(), 2);
+        System.out.println("[Breached] Created fallback spawn platform at x 0, y " + platformY + ", z 0.");
+        return spawnPos;
     }
 
     public static boolean shouldBlockNetherPortalCreation(World world, BlockPos pos) {
