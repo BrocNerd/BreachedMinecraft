@@ -168,7 +168,64 @@ public record BreachedStructureDefinition(
         );
     }
 
+    public BreachedStructureDefinition withPlannedCandidateCount(int plannedCandidateCount) {
+        return new BreachedStructureDefinition(
+                logName,
+                structureId,
+                requiredDimension,
+                countPerWorld,
+                plannedCandidateCount,
+                placementMode,
+                centerX,
+                centerZ,
+                placementOffsetX,
+                placementOffsetY,
+                placementOffsetZ,
+                minRadius,
+                maxRadius,
+                roughlyOpposed,
+                seedSalt,
+                protectionRadius,
+                preferredSpacingFromBreachedStructures,
+                minimumSpacingFromBreachedStructures,
+                avoidTrees,
+                avoidWater,
+                avoidSteepSlopes,
+                avoidBuriedPlacement,
+                allowUnderground,
+                needsFlatGround,
+                canClearBlocks,
+                protectedStructure,
+                waitForPlayers,
+                priority,
+                spawnImportance,
+                spacingGroup,
+                spacingPolicy,
+                maxVegetationObstruction,
+                maxSolidObstruction,
+                airPlacementMode,
+                terrainValidation,
+                heightSelection,
+                sampleStep,
+                mirror,
+                rotation,
+                surfaceRequirement,
+                supportMode,
+                supportBlock,
+                supportMarkerBlock,
+                supportMaxDepth,
+                prePlacementCheck
+        );
+    }
+
     public BreachedStructureDefinition withRadius(int minRadius, int maxRadius) {
+        return withRadiusAndSpacing(minRadius, maxRadius, preferredSpacingFromBreachedStructures, minimumSpacingFromBreachedStructures);
+    }
+
+    public BreachedStructureDefinition withSpacing(
+            int preferredSpacingFromBreachedStructures,
+            int minimumSpacingFromBreachedStructures
+    ) {
         return withRadiusAndSpacing(minRadius, maxRadius, preferredSpacingFromBreachedStructures, minimumSpacingFromBreachedStructures);
     }
 

@@ -34,6 +34,7 @@ import nrd.breached.block.IronCraftingTableBlock;
 import nrd.breached.block.LandlockBlock;
 import nrd.breached.block.LandlockBlockEntity;
 import nrd.breached.block.NetheriteCraftingTableBlock;
+import nrd.breached.config.BreachedConfig;
 import nrd.breached.item.BreacherItem;
 import nrd.breached.landlock.LandlockClaimManager;
 import nrd.breached.respawn.RespawnCooldownManager;
@@ -130,6 +131,7 @@ public class Breached implements ModInitializer {
 
     @Override
     public void onInitialize() {
+        BreachedConfig.load();
         TeamCommands.register();
         registerLandlockDebugEvents();
         registerLandlockProtectionEvents();

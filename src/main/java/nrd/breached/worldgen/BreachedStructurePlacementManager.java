@@ -4,12 +4,18 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.LeavesBlock;
 import net.minecraft.block.PillarBlock;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.inventory.Inventory;
+import net.minecraft.inventory.LootableInventory;
 import net.minecraft.item.BlockItem;
+import net.minecraft.loot.LootTable;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.structure.StructureTemplate;
@@ -21,6 +27,7 @@ import net.minecraft.util.math.Vec3i;
 import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
+import nrd.breached.config.BreachedConfig;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -35,14 +42,11 @@ public final class BreachedStructurePlacementManager {
     private static final int PORTAL_ACTIVE_CHECK_RADIUS = 16;
     private static final int REQUIRED_CHUNK_LOADS_PER_TICK = 1;
     private static final int MAX_FORCED_CHUNK_TICKS = 200;
-    private static final int MINOR_POI_CHANCE_DIVISOR = 10;
-    private static final int MINOR_POI_LOCAL_CANDIDATES_PER_CHUNK = 6;
+    private static final int MAX_FORCED_RESTOCK_CHUNK_TICKS = 200;
     private static final int MINOR_POI_CHUNK_INSET = 2;
-    private static final int MINOR_POI_PLAYER_SCAN_INTERVAL_TICKS = 200;
-    private static final int MINOR_POI_PLAYER_SCAN_RADIUS_CHUNKS = 2;
-    private static final int MINOR_POI_PENDING_CHUNKS_PER_TICK = 2;
     private static final Set<PendingStructurePlacement> PENDING_PLACEMENTS = new HashSet<>();
     private static final Set<ForcedStructureChunk> FORCED_CHUNKS = new HashSet<>();
+    private static final Set<ForcedRestockChunk> FORCED_RESTOCK_CHUNKS = new HashSet<>();
     private static final Set<PendingMinorPoiChunk> PENDING_MINOR_POI_CHUNKS = new HashSet<>();
 
     private BreachedStructurePlacementManager() {
@@ -100,6 +104,8 @@ public final class BreachedStructurePlacementManager {
         releaseCompletedForcedChunks(world, state);
         tryPlacePendingMinorPoiChunks(world, state);
         tryPlaceMinorPoisNearPlayers(world, state);
+        restockMajorStructureLoot(world, state);
+        releaseExpiredForcedRestockChunks(world);
 
         if (PENDING_PLACEMENTS.isEmpty()) {
             return;
@@ -117,31 +123,74 @@ public final class BreachedStructurePlacementManager {
                 continue;
             }
 
+            PlannedCandidateEvaluation bestEvaluation = null;
+            int evaluatedCandidates = 0;
+            boolean handledPlacement = false;
+
             for (BreachedStructureSpawnManager.RadiusCandidate candidate : generatePlannedCandidates(world, activeDefinition)) {
                 String placementKey = placementKey(structureKey, candidate.index());
                 PendingStructurePlacement pendingPlacement = new PendingStructurePlacement(world.getSeed(), structureKey, placementKey, candidate);
-                if (!PENDING_PLACEMENTS.remove(pendingPlacement)
-                        || state.hasPlacement(placementKey)
-                        || !state.hasReservation(placementKey)
-                        || state.hasFailedCandidate(structureKey, candidate.index())) {
+                if (!PENDING_PLACEMENTS.contains(pendingPlacement)) {
                     continue;
                 }
 
-                PlacementAttemptResult result = placePlannedCandidate(world, state, activeDefinition, structureKey, placementKey, candidate);
-                if (result == PlacementAttemptResult.PLACED || result == PlacementAttemptResult.HANDLED) {
+                if (state.hasPlacement(placementKey)
+                        || !state.hasReservation(placementKey)
+                        || state.hasFailedCandidate(structureKey, candidate.index())) {
+                    PENDING_PLACEMENTS.remove(pendingPlacement);
+                    continue;
+                }
+
+                PlannedCandidateEvaluation evaluation = evaluatePlannedCandidate(
+                        world,
+                        state,
+                        activeDefinition,
+                        structureKey,
+                        pendingPlacement
+                );
+                if (evaluation.result() == PlacementAttemptResult.NOT_READY) {
+                    continue;
+                }
+
+                PENDING_PLACEMENTS.remove(pendingPlacement);
+                if (evaluation.result() == PlacementAttemptResult.HANDLED) {
                     if (countPlacedStructures(state, structureKey) >= activeDefinition.countPerWorld()) {
                         PENDING_PLACEMENTS.removeIf(pending -> pending.worldSeed() == world.getSeed() && pending.structureKey().equals(structureKey));
                     }
+                    handledPlacement = true;
                     break;
                 }
 
-                if (!hasRemainingCandidates(world, state, activeDefinition, structureKey)) {
-                    int plannedCandidateCount = generatePlannedCandidates(world, activeDefinition).size();
-                    System.out.println("[Breached] Failed to place " + activeDefinition.logName()
-                            + " after rejecting " + state.failedCandidateCount(structureKey)
-                            + " of " + plannedCandidateCount
-                            + " planned candidates for " + structureKey + ".");
+                if (evaluation.result() == PlacementAttemptResult.READY) {
+                    evaluatedCandidates++;
+                    if (bestEvaluation == null || comparePlannedCandidateEvaluations(evaluation, bestEvaluation) < 0) {
+                        bestEvaluation = evaluation;
+                    }
+
+                    if (evaluatedCandidates >= BreachedConfig.get().plannedCandidateEvaluationsPerStructureTick) {
+                        break;
+                    }
                 }
+            }
+
+            if (handledPlacement) {
+                continue;
+            }
+
+            if (bestEvaluation != null) {
+                placeEvaluatedPlannedCandidate(world, state, activeDefinition, bestEvaluation);
+                if (countPlacedStructures(state, structureKey) >= activeDefinition.countPerWorld()) {
+                    PENDING_PLACEMENTS.removeIf(pending -> pending.worldSeed() == world.getSeed() && pending.structureKey().equals(structureKey));
+                }
+                continue;
+            }
+
+            if (!hasRemainingCandidates(world, state, activeDefinition, structureKey)) {
+                int plannedCandidateCount = generatePlannedCandidates(world, activeDefinition).size();
+                System.out.println("[Breached] Failed to place " + activeDefinition.logName()
+                        + " after rejecting " + state.failedCandidateCount(structureKey)
+                        + " of " + plannedCandidateCount
+                        + " planned candidates for " + structureKey + ".");
             }
         }
     }
@@ -155,55 +204,16 @@ public final class BreachedStructurePlacementManager {
             return MinorPoiAttemptResult.NOT_READY;
         }
 
-        for (BreachedStructureDefinition definition : BreachedStructureDefinitions.MINOR_POI_STRUCTURES) {
-            BreachedStructureDefinition activeDefinition = getActiveDefinition(world, definition);
-            if (!world.getRegistryKey().equals(activeDefinition.requiredDimension())) {
-                continue;
-            }
-
-            String structureKey = BreachedStructureDefinitions.key(activeDefinition);
-            if (countPlacedStructures(state, structureKey) >= activeDefinition.countPerWorld()) {
-                continue;
-            }
-
-            int candidateIndex = minorCandidateIndex(chunkPos);
-            String placementKey = placementKey(structureKey, candidateIndex);
-            if (state.hasPlacement(placementKey) || state.hasFailedCandidate(structureKey, candidateIndex)) {
-                continue;
-            }
-
-            java.util.Random random = createMinorPoiRandom(world.getSeed(), activeDefinition, chunkPos);
-            if (random.nextInt(MINOR_POI_CHANCE_DIVISOR) != 0) {
-                continue;
-            }
-
-            Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, activeDefinition);
-            if (template.isEmpty()) {
-                continue;
-            }
-
-            MinorPoiAttemptResult result = placeMinorPoiInChunk(
-                    world,
-                    state,
-                    activeDefinition,
-                    structureKey,
-                    placementKey,
-                    candidateIndex,
-                    template.get(),
-                    chunkPos,
-                    random
-            );
-            if (result == MinorPoiAttemptResult.FAILED) {
-                state.markCandidateFailed(structureKey, candidateIndex);
-                continue;
-            }
-
-            if (result == MinorPoiAttemptResult.PLACED || result == MinorPoiAttemptResult.NOT_READY) {
-                return result;
-            }
+        if (countPlacedMinorPois(state) >= getMinorPoiBudget(world)) {
+            return MinorPoiAttemptResult.FAILED;
         }
 
-        return MinorPoiAttemptResult.FAILED;
+        java.util.Random random = createMinorPoiChunkRandom(world.getSeed(), chunkPos);
+        if (random.nextInt(BreachedConfig.get().minorPoi.chunkChanceDivisor) != 0) {
+            return MinorPoiAttemptResult.FAILED;
+        }
+
+        return placeBestMinorPoiInChunk(world, state, chunkPos, random);
     }
 
     private static void tryPlacePendingMinorPoiChunks(ServerWorld world, BreachedStructurePlacementState state) {
@@ -213,7 +223,7 @@ public final class BreachedStructurePlacementManager {
                 continue;
             }
 
-            if (attempted >= MINOR_POI_PENDING_CHUNKS_PER_TICK) {
+            if (attempted >= BreachedConfig.get().minorPoi.pendingChunksPerTick) {
                 break;
             }
 
@@ -228,14 +238,15 @@ public final class BreachedStructurePlacementManager {
     }
 
     private static void tryPlaceMinorPoisNearPlayers(ServerWorld world, BreachedStructurePlacementState state) {
-        if (world.getTime() % MINOR_POI_PLAYER_SCAN_INTERVAL_TICKS != 0 || world.getPlayers().isEmpty()) {
+        BreachedConfig.MinorPoiSettings minorPoiConfig = BreachedConfig.get().minorPoi;
+        if (world.getTime() % minorPoiConfig.playerScanIntervalTicks != 0 || world.getPlayers().isEmpty()) {
             return;
         }
 
         for (PlayerEntity player : world.getPlayers()) {
             ChunkPos playerChunk = player.getChunkPos();
-            for (int xOffset = -MINOR_POI_PLAYER_SCAN_RADIUS_CHUNKS; xOffset <= MINOR_POI_PLAYER_SCAN_RADIUS_CHUNKS; xOffset++) {
-                for (int zOffset = -MINOR_POI_PLAYER_SCAN_RADIUS_CHUNKS; zOffset <= MINOR_POI_PLAYER_SCAN_RADIUS_CHUNKS; zOffset++) {
+            for (int xOffset = -minorPoiConfig.playerScanRadiusChunks; xOffset <= minorPoiConfig.playerScanRadiusChunks; xOffset++) {
+                for (int zOffset = -minorPoiConfig.playerScanRadiusChunks; zOffset <= minorPoiConfig.playerScanRadiusChunks; zOffset++) {
                     ChunkPos chunkPos = new ChunkPos(playerChunk.x + xOffset, playerChunk.z + zOffset);
                     if (!world.isChunkLoaded(chunkPos.x, chunkPos.z)) {
                         continue;
@@ -250,85 +261,201 @@ public final class BreachedStructurePlacementManager {
         }
     }
 
-    private static MinorPoiAttemptResult placeMinorPoiInChunk(
+    private static MinorPoiAttemptResult placeBestMinorPoiInChunk(
             ServerWorld world,
             BreachedStructurePlacementState state,
-            BreachedStructureDefinition definition,
-            String structureKey,
-            String placementKey,
-            int candidateIndex,
-            StructureTemplate template,
             ChunkPos chunkPos,
             java.util.Random random
     ) {
-        Vec3i footprintSize = BreachedStructureSpawnManager.getRotatedSize(template.getSize(), definition.rotation());
+        int candidateIndex = minorCandidateIndex(chunkPos);
+        List<MinorPoiLocalCandidate> localCandidates = generateMinorPoiLocalCandidates(chunkPos, random);
+        MinorPoiPlacementChoice bestChoice = null;
         boolean skippedUnloadedFootprint = false;
-        for (int attempt = 0; attempt < MINOR_POI_LOCAL_CANDIDATES_PER_CHUNK; attempt++) {
-            int x = chunkPos.x * CHUNK_SIZE + MINOR_POI_CHUNK_INSET + random.nextInt(CHUNK_SIZE - (MINOR_POI_CHUNK_INSET * 2));
-            int z = chunkPos.z * CHUNK_SIZE + MINOR_POI_CHUNK_INSET + random.nextInt(CHUNK_SIZE - (MINOR_POI_CHUNK_INSET * 2));
-            if (!isInsideDefinitionRadius(definition, x, z)) {
+
+        for (BreachedStructureDefinition definition : BreachedStructureDefinitions.MINOR_POI_STRUCTURES) {
+            BreachedStructureDefinition activeDefinition = getActiveDefinition(world, definition);
+            if (!world.getRegistryKey().equals(activeDefinition.requiredDimension())) {
                 continue;
             }
 
-            BreachedStructureSpawnManager.RadiusCandidate candidate = new BreachedStructureSpawnManager.RadiusCandidate(
-                    candidateIndex,
-                    x,
-                    z,
-                    distanceFromDefinitionCenter(definition, x, z),
-                    0.0D
-            );
-            SpacingEvaluation spacing = evaluateSpacing(state, definition, structureKey, placementKey, candidate);
-            if (!spacing.accepted()) {
+            String structureKey = BreachedStructureDefinitions.key(activeDefinition);
+            if (activeDefinition.countPerWorld() > 0 && countPlacedStructures(state, structureKey) >= activeDefinition.countPerWorld()) {
                 continue;
             }
 
-            int originX = getPlacementOriginX(definition, candidate);
-            int originZ = getPlacementOriginZ(definition, candidate);
-            if (!isFootprintLoaded(world, originX, originZ, footprintSize)) {
-                skippedUnloadedFootprint = true;
+            String placementKey = placementKey(structureKey, candidateIndex);
+            if (state.hasPlacement(placementKey) || state.hasFailedCandidate(structureKey, candidateIndex)) {
                 continue;
             }
 
-            BreachedStructureSite site = BreachedStructureSpawnManager.evaluateSite(
-                    world,
-                    definition,
-                    template,
-                    originX,
-                    originZ,
-                    candidate.radius()
-            );
-            if (!site.accepted()) {
+            Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, activeDefinition);
+            if (template.isEmpty()) {
                 continue;
             }
 
-            ObstructionEvaluation obstruction = evaluateObstruction(world, definition, footprintSize, site);
-            if (!obstruction.accepted()) {
-                continue;
+            Vec3i footprintSize = BreachedStructureSpawnManager.getRotatedSize(template.get().getSize(), activeDefinition.rotation());
+            boolean foundCandidateForStructure = false;
+            boolean skippedFullSpreadCellForStructure = false;
+            boolean skippedSpacingBlockedForStructure = false;
+
+            for (MinorPoiLocalCandidate localCandidate : localCandidates) {
+                MinorPoiPlacementChoice choice = evaluateMinorPoiChoice(
+                        world,
+                        state,
+                        activeDefinition,
+                        placementKey,
+                        candidateIndex,
+                        template.get(),
+                        footprintSize,
+                        localCandidate
+                );
+
+                if (choice == MinorPoiPlacementChoice.NOT_READY) {
+                    skippedUnloadedFootprint = true;
+                    continue;
+                }
+
+                if (choice == MinorPoiPlacementChoice.SPACING_BLOCKED) {
+                    skippedSpacingBlockedForStructure = true;
+                    continue;
+                }
+
+                if (choice == MinorPoiPlacementChoice.SPREAD_CELL_FULL) {
+                    skippedFullSpreadCellForStructure = true;
+                    continue;
+                }
+
+                if (choice == null) {
+                    continue;
+                }
+
+                foundCandidateForStructure = true;
+                if (bestChoice == null || compareMinorPoiPlacementChoices(choice, bestChoice) < 0) {
+                    bestChoice = choice;
+                }
             }
 
-            BreachedStructurePlacement placement = BreachedStructureSpawnManager.place(
-                    world,
-                    definition,
-                    template,
-                    originX,
-                    getPlacementOriginY(world, definition, candidate),
-                    originZ,
-                    definition.mirror(),
-                    definition.rotation(),
-                    site
-            );
-            BreachedStructureSupportGenerator.generate(world, definition, placement);
-            clearNaturalBlocksAboveStructure(world, definition, placement);
-            state.markPlaced(placementKey, placement, world.getTime());
-            System.out.println("[Breached] Placed minor POI " + definition.logName()
-                    + " from chunk " + chunkPos.x + ", " + chunkPos.z
-                    + " at x " + placement.origin().getX()
-                    + ", y " + placement.origin().getY()
-                    + ", z " + placement.origin().getZ() + ".");
-            return MinorPoiAttemptResult.PLACED;
+            if (!foundCandidateForStructure
+                    && !skippedUnloadedFootprint
+                    && !skippedFullSpreadCellForStructure
+                    && !skippedSpacingBlockedForStructure) {
+                state.markCandidateFailed(structureKey, candidateIndex);
+            }
         }
 
-        return skippedUnloadedFootprint ? MinorPoiAttemptResult.NOT_READY : MinorPoiAttemptResult.FAILED;
+        if (bestChoice == null) {
+            return skippedUnloadedFootprint ? MinorPoiAttemptResult.NOT_READY : MinorPoiAttemptResult.FAILED;
+        }
+
+        BreachedStructurePlacement placement = BreachedStructureSpawnManager.place(
+                world,
+                bestChoice.definition(),
+                bestChoice.template(),
+                bestChoice.originX(),
+                getPlacementOriginY(bestChoice.definition(), bestChoice.site()),
+                bestChoice.originZ(),
+                bestChoice.definition().mirror(),
+                bestChoice.definition().rotation(),
+                bestChoice.site()
+        );
+        BreachedStructureSupportGenerator.generate(world, bestChoice.definition(), placement);
+        clearNaturalBlocksAboveStructure(world, bestChoice.definition(), placement);
+        state.markPlaced(bestChoice.placementKey(), placement, world.getTime());
+        System.out.println("[Breached] Placed minor POI " + bestChoice.definition().logName()
+                + " from chunk " + chunkPos.x + ", " + chunkPos.z
+                + " at x " + placement.origin().getX()
+                + ", y " + placement.origin().getY()
+                + ", z " + placement.origin().getZ()
+                + " score " + Math.round(bestChoice.score()) + ".");
+        return MinorPoiAttemptResult.PLACED;
+    }
+
+    private static MinorPoiPlacementChoice evaluateMinorPoiChoice(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            BreachedStructureDefinition definition,
+            String placementKey,
+            int candidateIndex,
+            StructureTemplate template,
+            Vec3i footprintSize,
+            MinorPoiLocalCandidate localCandidate
+    ) {
+        if (!isInsideDefinitionRadius(definition, localCandidate.x(), localCandidate.z())) {
+            return null;
+        }
+
+        BreachedStructureSpawnManager.RadiusCandidate candidate = new BreachedStructureSpawnManager.RadiusCandidate(
+                candidateIndex,
+                localCandidate.x(),
+                localCandidate.z(),
+                distanceFromDefinitionCenter(definition, localCandidate.x(), localCandidate.z()),
+                0.0D
+        );
+
+        int originX = getPlacementOriginX(definition, candidate);
+        int originZ = getPlacementOriginZ(definition, candidate);
+        int centerX = originX + footprintSize.getX() / 2;
+        int centerZ = originZ + footprintSize.getZ() / 2;
+        if (isMinorPoiSpreadCellFull(state, centerX, centerZ)) {
+            return MinorPoiPlacementChoice.SPREAD_CELL_FULL;
+        }
+
+        SpacingEvaluation minorSpacing = evaluateMinorPoiCenterSpacing(state, definition, placementKey, centerX, centerZ);
+        if (!minorSpacing.accepted()) {
+            return MinorPoiPlacementChoice.SPACING_BLOCKED;
+        }
+
+        if (!isFootprintLoaded(world, originX, originZ, footprintSize)) {
+            return MinorPoiPlacementChoice.NOT_READY;
+        }
+
+        BreachedStructureSite site = BreachedStructureSpawnManager.evaluateSite(
+                world,
+                definition,
+                template,
+                originX,
+                originZ,
+                candidate.radius()
+        );
+        if (!site.accepted()) {
+            return null;
+        }
+
+        ObstructionEvaluation obstruction = evaluateObstruction(world, definition, footprintSize, site);
+        if (!obstruction.accepted()) {
+            return null;
+        }
+
+        return new MinorPoiPlacementChoice(
+                definition,
+                placementKey,
+                template,
+                candidate,
+                site,
+                originX,
+                originZ,
+                site.score() + obstruction.penalty() + minorSpacing.penalty()
+        );
+    }
+
+    private static List<MinorPoiLocalCandidate> generateMinorPoiLocalCandidates(ChunkPos chunkPos, java.util.Random random) {
+        List<MinorPoiLocalCandidate> candidates = new ArrayList<>();
+        for (int attempt = 0; attempt < BreachedConfig.get().minorPoi.localCandidatesPerChunk; attempt++) {
+            int x = chunkPos.x * CHUNK_SIZE + MINOR_POI_CHUNK_INSET + random.nextInt(CHUNK_SIZE - (MINOR_POI_CHUNK_INSET * 2));
+            int z = chunkPos.z * CHUNK_SIZE + MINOR_POI_CHUNK_INSET + random.nextInt(CHUNK_SIZE - (MINOR_POI_CHUNK_INSET * 2));
+            candidates.add(new MinorPoiLocalCandidate(x, z));
+        }
+
+        return candidates;
+    }
+
+    private static int compareMinorPoiPlacementChoices(MinorPoiPlacementChoice left, MinorPoiPlacementChoice right) {
+        int scoreCompare = Double.compare(left.score(), right.score());
+        if (scoreCompare != 0) {
+            return scoreCompare;
+        }
+
+        return Integer.compare(left.candidate().index(), right.candidate().index());
     }
 
     private static void clearNaturalBlocksAboveStructure(
@@ -396,39 +523,56 @@ public final class BreachedStructurePlacementManager {
             if (definition.isEmpty() || definition.get().spawnImportance() != BreachedStructureDefinition.SpawnImportance.REQUIRED) {
                 continue;
             }
+            if (countPlacedStructures(state, reservation.structureKey()) >= definition.get().countPerWorld()) {
+                continue;
+            }
 
             Optional<BreachedStructureSpawnManager.RadiusCandidate> candidate = getReservedCandidate(world, definition.get(), reservation);
             if (candidate.isEmpty()) {
                 continue;
             }
 
-            ChunkPos chunkPos = new ChunkPos(Math.floorDiv(reservation.x(), 16), Math.floorDiv(reservation.z(), 16));
-            ForcedStructureChunk forcedChunk = new ForcedStructureChunk(
-                    world.getSeed(),
-                    reservation.structureKey(),
-                    placementKey,
-                    reservation.candidateIndex(),
-                    chunkPos.x,
-                    chunkPos.z
-            );
-            if (!isForceLoaded(world.getSeed(), placementKey)) {
-                FORCED_CHUNKS.add(forcedChunk);
-                world.setChunkForced(chunkPos.x, chunkPos.z, true);
-                System.out.println("[Breached] Force-loading required structure chunk "
-                        + chunkPos.x + ", " + chunkPos.z
-                        + " for " + placementKey + ".");
+            Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, definition.get());
+            if (template.isEmpty()) {
+                continue;
             }
 
-            world.getChunk(chunkPos.x, chunkPos.z);
+            Vec3i footprintSize = BreachedStructureSpawnManager.getRotatedSize(template.get().getSize(), definition.get().rotation());
+            int originX = getPlacementOriginX(definition.get(), candidate.get());
+            int originZ = getPlacementOriginZ(definition.get(), candidate.get());
+            Optional<ChunkPos> unloadedFootprintChunk = getFirstUnloadedFootprintChunk(world, originX, originZ, footprintSize);
+            if (unloadedFootprintChunk.isPresent()) {
+                ChunkPos chunkPos = unloadedFootprintChunk.get();
+                ForcedStructureChunk forcedChunk = new ForcedStructureChunk(
+                        world.getSeed(),
+                        reservation.structureKey(),
+                        placementKey,
+                        reservation.candidateIndex(),
+                        chunkPos.x,
+                        chunkPos.z
+                );
+                if (!isForceLoaded(world.getSeed(), placementKey, chunkPos.x, chunkPos.z)) {
+                    FORCED_CHUNKS.add(forcedChunk);
+                    world.setChunkForced(chunkPos.x, chunkPos.z, true);
+                    System.out.println("[Breached] Force-loading required structure footprint chunk "
+                            + chunkPos.x + ", " + chunkPos.z
+                            + " for " + placementKey + ".");
+                }
+
+                world.getChunk(chunkPos.x, chunkPos.z);
+                loadedThisTick++;
+            }
+
             PENDING_PLACEMENTS.add(new PendingStructurePlacement(world.getSeed(), reservation.structureKey(), placementKey, candidate.get()));
-            loadedThisTick++;
         }
     }
 
-    private static boolean isForceLoaded(long worldSeed, String placementKey) {
+    private static boolean isForceLoaded(long worldSeed, String placementKey, int chunkX, int chunkZ) {
         return FORCED_CHUNKS.stream()
                 .anyMatch(forcedChunk -> forcedChunk.worldSeed() == worldSeed
-                        && forcedChunk.placementKey().equals(placementKey));
+                        && forcedChunk.placementKey().equals(placementKey)
+                        && forcedChunk.chunkX() == chunkX
+                        && forcedChunk.chunkZ() == chunkZ);
     }
 
     private static void releaseCompletedForcedChunks(ServerWorld world, BreachedStructurePlacementState state) {
@@ -525,24 +669,25 @@ public final class BreachedStructurePlacementManager {
     }
 
     private static int compareReservationChoices(ReservationChoice left, ReservationChoice right) {
-        int penaltyCompare = Double.compare(left.spacingPenalty(), right.spacingPenalty());
-        if (penaltyCompare != 0) {
-            return penaltyCompare;
+        int spacingCompare = Double.compare(left.spacingPenalty(), right.spacingPenalty());
+        if (spacingCompare != 0) {
+            return spacingCompare;
         }
 
         return Integer.compare(left.candidate().index(), right.candidate().index());
     }
 
-    private static PlacementAttemptResult placePlannedCandidate(
+    private static PlannedCandidateEvaluation evaluatePlannedCandidate(
             ServerWorld world,
             BreachedStructurePlacementState state,
             BreachedStructureDefinition definition,
             String structureKey,
-            String placementKey,
-            BreachedStructureSpawnManager.RadiusCandidate candidate
+            PendingStructurePlacement pendingPlacement
     ) {
+        String placementKey = pendingPlacement.placementKey();
+        BreachedStructureSpawnManager.RadiusCandidate candidate = pendingPlacement.candidate();
         if (isHandledByPrePlacementCheck(world, state, definition, placementKey, candidate)) {
-            return PlacementAttemptResult.HANDLED;
+            return new PlannedCandidateEvaluation(pendingPlacement, null, null, 0.0D, PlacementAttemptResult.HANDLED);
         }
 
         SpacingEvaluation spacing = evaluateSpacing(state, definition, structureKey, placementKey, candidate);
@@ -554,7 +699,7 @@ public final class BreachedStructurePlacementManager {
                     + ", z " + candidate.z()
                     + ", radius " + candidate.radius()
                     + ": " + spacing.rejectionReason() + ".");
-            return PlacementAttemptResult.FAILED;
+            return new PlannedCandidateEvaluation(pendingPlacement, null, null, Double.MAX_VALUE, PlacementAttemptResult.FAILED);
         }
 
         Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, definition);
@@ -562,15 +707,22 @@ public final class BreachedStructurePlacementManager {
             System.out.println("[Breached] Skipped planned candidate " + candidate.index()
                     + " for " + definition.logName()
                     + " because the structure template is missing; it was not marked failed.");
-            return PlacementAttemptResult.SKIPPED;
+            return new PlannedCandidateEvaluation(pendingPlacement, null, null, Double.MAX_VALUE, PlacementAttemptResult.SKIPPED);
+        }
+
+        Vec3i footprintSize = BreachedStructureSpawnManager.getRotatedSize(template.get().getSize(), definition.rotation());
+        int originX = getPlacementOriginX(definition, candidate);
+        int originZ = getPlacementOriginZ(definition, candidate);
+        if (!isFootprintLoaded(world, originX, originZ, footprintSize)) {
+            return new PlannedCandidateEvaluation(pendingPlacement, null, null, Double.MAX_VALUE, PlacementAttemptResult.NOT_READY);
         }
 
         BreachedStructureSite site = BreachedStructureSpawnManager.evaluateSite(
                 world,
                 definition,
                 template.get(),
-                getPlacementOriginX(definition, candidate),
-                getPlacementOriginZ(definition, candidate),
+                originX,
+                originZ,
                 candidate.radius()
         );
         if (!site.accepted()) {
@@ -581,10 +733,9 @@ public final class BreachedStructurePlacementManager {
                     + ", z " + candidate.z()
                     + ", radius " + candidate.radius()
                     + ": " + site.rejectionReason() + ".");
-            return PlacementAttemptResult.FAILED;
+            return new PlannedCandidateEvaluation(pendingPlacement, null, null, Double.MAX_VALUE, PlacementAttemptResult.FAILED);
         }
 
-        Vec3i footprintSize = BreachedStructureSpawnManager.getRotatedSize(template.get().getSize(), definition.rotation());
         ObstructionEvaluation obstruction = evaluateObstruction(world, definition, footprintSize, site);
         if (!obstruction.accepted()) {
             state.markCandidateFailed(structureKey, candidate.index());
@@ -594,22 +745,54 @@ public final class BreachedStructurePlacementManager {
                     + ", z " + candidate.z()
                     + ", radius " + candidate.radius()
                     + ": " + obstruction.rejectionReason() + ".");
-            return PlacementAttemptResult.FAILED;
+            return new PlannedCandidateEvaluation(pendingPlacement, null, null, Double.MAX_VALUE, PlacementAttemptResult.FAILED);
         }
 
+        return new PlannedCandidateEvaluation(
+                pendingPlacement,
+                template.get(),
+                site,
+                site.score() + obstruction.penalty() + spacing.penalty(),
+                PlacementAttemptResult.READY
+        );
+    }
+
+    private static int comparePlannedCandidateEvaluations(PlannedCandidateEvaluation left, PlannedCandidateEvaluation right) {
+        int scoreCompare = Double.compare(left.score(), right.score());
+        if (scoreCompare != 0) {
+            return scoreCompare;
+        }
+
+        return Integer.compare(left.pendingPlacement().candidate().index(), right.pendingPlacement().candidate().index());
+    }
+
+    private static PlacementAttemptResult placeEvaluatedPlannedCandidate(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            BreachedStructureDefinition definition,
+            PlannedCandidateEvaluation evaluation
+    ) {
+        PendingStructurePlacement pendingPlacement = evaluation.pendingPlacement();
+        BreachedStructureSpawnManager.RadiusCandidate candidate = pendingPlacement.candidate();
         BreachedStructurePlacement placement = BreachedStructureSpawnManager.place(
                 world,
                 definition,
-                template.get(),
+                evaluation.template(),
                 getPlacementOriginX(definition, candidate),
-                getPlacementOriginY(world, definition, candidate),
+                getPlacementOriginY(definition, evaluation.site()),
                 getPlacementOriginZ(definition, candidate),
                 definition.mirror(),
                 definition.rotation(),
-                site
+                evaluation.site()
         );
         BreachedStructureSupportGenerator.generate(world, definition, placement);
-        state.markPlaced(placementKey, placement, world.getTime());
+        state.markPlaced(
+                pendingPlacement.placementKey(),
+                placement,
+                world.getTime(),
+                getSavedLootContainers(world, definition, evaluation.template(), placement),
+                createNextMajorLootRestockTime(world, pendingPlacement.placementKey())
+        );
         System.out.println("[Breached] Registered protected structure " + definition.logName()
                 + " around x " + BreachedStructureSpawnManager.getProtectedCenterX(placement)
                 + ", z " + BreachedStructureSpawnManager.getProtectedCenterZ(placement)
@@ -642,10 +825,11 @@ public final class BreachedStructurePlacementManager {
     }
 
     private static BreachedStructureDefinition getActiveDefinition(ServerWorld world, BreachedStructureDefinition definition) {
-        return BreachedStructureDefinitions.applyPresetOverrides(
+        BreachedStructureDefinition presetDefinition = BreachedStructureDefinitions.applyPresetOverrides(
                 definition,
                 BreachedDimensionRules.getBreachedPreset(world.getServer())
         );
+        return BreachedConfig.get().applyStructureOverrides(presetDefinition);
     }
 
     private static Optional<BreachedStructureDefinition> getActiveDefinition(ServerWorld world, String structureKey) {
@@ -660,11 +844,10 @@ public final class BreachedStructurePlacementManager {
     }
 
     private static int getPlacementOriginY(
-            ServerWorld world,
             BreachedStructureDefinition definition,
-            BreachedStructureSpawnManager.RadiusCandidate candidate
+            BreachedStructureSite site
     ) {
-        return BreachedStructureSpawnManager.getSurfaceY(world, candidate.x(), candidate.z()) + definition.placementOffsetY();
+        return site.surfaceY() + definition.placementOffsetY();
     }
 
     private static int getPlacementOriginZ(
@@ -674,13 +857,9 @@ public final class BreachedStructurePlacementManager {
         return candidate.z() + definition.placementOffsetZ();
     }
 
-    private static java.util.Random createMinorPoiRandom(
-            long worldSeed,
-            BreachedStructureDefinition definition,
-            ChunkPos chunkPos
-    ) {
+    private static java.util.Random createMinorPoiChunkRandom(long worldSeed, ChunkPos chunkPos) {
         long seed = worldSeed
-                ^ definition.seedSalt()
+                ^ 0x4D49504F4943484CL
                 ^ ((long) chunkPos.x * 341873128712L)
                 ^ ((long) chunkPos.z * 132897987541L);
         return new java.util.Random(seed);
@@ -705,6 +884,10 @@ public final class BreachedStructurePlacementManager {
     }
 
     private static boolean isFootprintLoaded(ServerWorld world, int originX, int originZ, Vec3i footprintSize) {
+        return getFirstUnloadedFootprintChunk(world, originX, originZ, footprintSize).isEmpty();
+    }
+
+    private static Optional<ChunkPos> getFirstUnloadedFootprintChunk(ServerWorld world, int originX, int originZ, Vec3i footprintSize) {
         int minChunkX = Math.floorDiv(originX, CHUNK_SIZE);
         int minChunkZ = Math.floorDiv(originZ, CHUNK_SIZE);
         int maxChunkX = Math.floorDiv(originX + footprintSize.getX() - 1, CHUNK_SIZE);
@@ -713,12 +896,12 @@ public final class BreachedStructurePlacementManager {
         for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
             for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
                 if (!world.isChunkLoaded(chunkX, chunkZ)) {
-                    return false;
+                    return Optional.of(new ChunkPos(chunkX, chunkZ));
                 }
             }
         }
 
-        return true;
+        return Optional.empty();
     }
 
     private static List<BreachedStructureSpawnManager.RadiusCandidate> generatePlannedCandidates(
@@ -800,6 +983,466 @@ public final class BreachedStructurePlacementManager {
         }
 
         return placed;
+    }
+
+    private static void restockMajorStructureLoot(ServerWorld world, BreachedStructurePlacementState state) {
+        BreachedConfig.MajorStructureLootSettings lootConfig = BreachedConfig.get().majorStructureLoot;
+        boolean scanTick = world.getTime() % lootConfig.scanIntervalTicks == 0;
+        if (!lootConfig.enabled || (!scanTick && !hasForcedRestockChunksForWorld(world))) {
+            return;
+        }
+
+        int restockedStructures = 0;
+        int totalRestockedContainers = 0;
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> entry : new ArrayList<>(state.placements())) {
+            Optional<BreachedStructureDefinition> definition = getMajorDefinition(entry.getKey())
+                    .map(baseDefinition -> getActiveDefinition(world, baseDefinition));
+            if (definition.isEmpty() || !world.getRegistryKey().equals(definition.get().requiredDimension())) {
+                continue;
+            }
+
+            BreachedStructurePlacementState.SavedPlacement placement = entry.getValue();
+            if (placement.nextRestockTime() <= placement.lastRestockTime()) {
+                state.markLootRestocked(
+                        entry.getKey(),
+                        placement.lastRestockTime(),
+                        createNextMajorLootRestockTime(world, entry.getKey())
+                );
+                continue;
+            }
+
+            if (world.getTime() < placement.nextRestockTime()) {
+                continue;
+            }
+
+            if (!placement.lootContainersScanned()) {
+                if (!tryBackfillMajorLootContainers(world, state, entry.getKey(), definition.get(), placement)) {
+                    continue;
+                }
+
+                placement = state.getPlacement(entry.getKey()).orElse(placement);
+            }
+
+            if (placement.lootContainers().isEmpty()) {
+                releaseForcedRestockChunks(world, entry.getKey());
+                state.markLootRestocked(
+                        entry.getKey(),
+                        world.getTime(),
+                        createNextMajorLootRestockTime(world, entry.getKey())
+                );
+                continue;
+            }
+
+            if (!areLootContainersLoaded(world, placement.lootContainers())) {
+                forceLoadMissingRestockChunks(world, entry.getKey(), placement.lootContainers());
+                continue;
+            }
+
+            int restockedContainers = restockLootContainers(world, entry.getKey(), placement.lootContainers());
+            releaseForcedRestockChunks(world, entry.getKey());
+            state.markLootRestocked(
+                    entry.getKey(),
+                    world.getTime(),
+                    createNextMajorLootRestockTime(world, entry.getKey())
+            );
+            if (restockedContainers > 0) {
+                restockedStructures++;
+                totalRestockedContainers += restockedContainers;
+                if (lootConfig.announceRestocks) {
+                    world.getServer().getPlayerManager().broadcast(
+                            Text.literal(getMajorRestockAnnouncement(entry.getKey())),
+                            false
+                    );
+                }
+                System.out.println("[Breached] Restocked " + restockedContainers
+                        + " major structure containers for " + entry.getKey() + ".");
+            }
+        }
+
+        if (totalRestockedContainers > 0) {
+            System.out.println("[Breached] Announced major structure loot restock for "
+                    + restockedStructures + " structures and "
+                    + totalRestockedContainers + " containers.");
+        }
+    }
+
+    private static String getMajorRestockAnnouncement(String placementKey) {
+        String structureKey = structureKey(placementKey);
+        if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.SWORD_STATUE))) {
+            return "The statue has been restocked";
+        }
+        if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.PINK_TREE))) {
+            return "The Tree has been restocked";
+        }
+        if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.BIG_BOAT))) {
+            return "The Ship has been restocked";
+        }
+        if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.HORACE))) {
+            return "Horace has been restocked";
+        }
+        if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.OFFICIAL_NETHER_PORTAL))) {
+            return "A portal has been restocked";
+        }
+
+        return "Major structure loot has been restocked";
+    }
+
+    private static boolean tryBackfillMajorLootContainers(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            String placementKey,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement
+    ) {
+        Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, definition);
+        if (template.isEmpty()) {
+            return false;
+        }
+
+        Vec3i footprintSize = BreachedStructureSpawnManager.getRotatedSize(template.get().getSize(), definition.rotation());
+        if (!isFootprintLoaded(world, placement.originX(), placement.originZ(), footprintSize)) {
+            forceLoadMissingRestockFootprintChunks(world, placementKey, placement.originX(), placement.originZ(), footprintSize);
+            return false;
+        }
+
+        List<BreachedStructurePlacementState.SavedLootContainer> lootContainers = getSavedLootContainers(
+                world,
+                definition,
+                template.get(),
+                new BlockPos(placement.originX(), placement.originY(), placement.originZ())
+        );
+        long nextRestockTime = placement.nextRestockTime() > placement.lastRestockTime()
+                ? placement.nextRestockTime()
+                : createNextMajorLootRestockTime(world, placementKey);
+        state.setLootContainers(placementKey, lootContainers, placement.lastRestockTime(), nextRestockTime);
+        if (!lootContainers.isEmpty()) {
+            System.out.println("[Breached] Tracked " + lootContainers.size()
+                    + " major structure containers for " + placementKey + ".");
+        }
+        return true;
+    }
+
+    private static List<BreachedStructurePlacementState.SavedLootContainer> getSavedLootContainers(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BreachedStructurePlacement placement
+    ) {
+        return getSavedLootContainers(world, definition, template, placement.origin());
+    }
+
+    private static List<BreachedStructurePlacementState.SavedLootContainer> getSavedLootContainers(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BlockPos origin
+    ) {
+        if (definition.spacingGroup() != BreachedStructureDefinition.SpacingGroup.MAJOR) {
+            return List.of();
+        }
+
+        List<BreachedStructurePlacementState.SavedLootContainer> lootContainers = new ArrayList<>();
+        for (BreachedStructureSpawnManager.TemplateLootContainer container : BreachedStructureSpawnManager.getTemplateLootContainers(
+                world,
+                definition,
+                template,
+                origin,
+                definition.mirror(),
+                definition.rotation()
+        )) {
+            lootContainers.add(new BreachedStructurePlacementState.SavedLootContainer(
+                    container.pos(),
+                    container.lootTableId(),
+                    container.lootTableSeed()
+            ));
+        }
+
+        return lootContainers;
+    }
+
+    private static boolean areLootContainersLoaded(
+            ServerWorld world,
+            List<BreachedStructurePlacementState.SavedLootContainer> lootContainers
+    ) {
+        for (BreachedStructurePlacementState.SavedLootContainer lootContainer : lootContainers) {
+            BlockPos pos = lootContainer.pos();
+            if (!world.isChunkLoaded(Math.floorDiv(pos.getX(), CHUNK_SIZE), Math.floorDiv(pos.getZ(), CHUNK_SIZE))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean hasForcedRestockChunksForWorld(ServerWorld world) {
+        return FORCED_RESTOCK_CHUNKS.stream()
+                .anyMatch(forcedChunk -> forcedChunk.worldSeed() == world.getSeed());
+    }
+
+    private static void forceLoadMissingRestockChunks(
+            ServerWorld world,
+            String placementKey,
+            List<BreachedStructurePlacementState.SavedLootContainer> lootContainers
+    ) {
+        Set<ChunkPos> chunks = new HashSet<>();
+        for (BreachedStructurePlacementState.SavedLootContainer lootContainer : lootContainers) {
+            BlockPos pos = lootContainer.pos();
+            chunks.add(new ChunkPos(Math.floorDiv(pos.getX(), CHUNK_SIZE), Math.floorDiv(pos.getZ(), CHUNK_SIZE)));
+        }
+
+        for (ChunkPos chunkPos : chunks) {
+            forceLoadRestockChunk(world, placementKey, chunkPos);
+        }
+    }
+
+    private static void forceLoadMissingRestockFootprintChunks(
+            ServerWorld world,
+            String placementKey,
+            int originX,
+            int originZ,
+            Vec3i footprintSize
+    ) {
+        int minChunkX = Math.floorDiv(originX, CHUNK_SIZE);
+        int minChunkZ = Math.floorDiv(originZ, CHUNK_SIZE);
+        int maxChunkX = Math.floorDiv(originX + footprintSize.getX() - 1, CHUNK_SIZE);
+        int maxChunkZ = Math.floorDiv(originZ + footprintSize.getZ() - 1, CHUNK_SIZE);
+
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                forceLoadRestockChunk(world, placementKey, new ChunkPos(chunkX, chunkZ));
+            }
+        }
+    }
+
+    private static void forceLoadRestockChunk(ServerWorld world, String placementKey, ChunkPos chunkPos) {
+        if (world.isChunkLoaded(chunkPos.x, chunkPos.z)) {
+            return;
+        }
+
+        if (!isRestockChunkForceLoaded(world.getSeed(), placementKey, chunkPos.x, chunkPos.z)) {
+            FORCED_RESTOCK_CHUNKS.add(new ForcedRestockChunk(world.getSeed(), placementKey, chunkPos.x, chunkPos.z));
+            world.setChunkForced(chunkPos.x, chunkPos.z, true);
+            System.out.println("[Breached] Force-loading major structure restock chunk "
+                    + chunkPos.x + ", " + chunkPos.z
+                    + " for " + placementKey + ".");
+        }
+
+        world.getChunk(chunkPos.x, chunkPos.z);
+    }
+
+    private static boolean isRestockChunkForceLoaded(long worldSeed, String placementKey, int chunkX, int chunkZ) {
+        return FORCED_RESTOCK_CHUNKS.stream()
+                .anyMatch(forcedChunk -> forcedChunk.worldSeed() == worldSeed
+                        && forcedChunk.placementKey().equals(placementKey)
+                        && forcedChunk.chunkX() == chunkX
+                        && forcedChunk.chunkZ() == chunkZ);
+    }
+
+    private static void releaseForcedRestockChunks(ServerWorld world, String placementKey) {
+        Set<ForcedRestockChunk> updatedForcedChunks = new HashSet<>();
+        for (ForcedRestockChunk forcedChunk : FORCED_RESTOCK_CHUNKS) {
+            if (forcedChunk.worldSeed() != world.getSeed() || !forcedChunk.placementKey().equals(placementKey)) {
+                updatedForcedChunks.add(forcedChunk);
+                continue;
+            }
+
+            world.setChunkForced(forcedChunk.chunkX(), forcedChunk.chunkZ(), false);
+            System.out.println("[Breached] Released force-loaded restock chunk "
+                    + forcedChunk.chunkX() + ", " + forcedChunk.chunkZ()
+                    + " for " + forcedChunk.placementKey() + ".");
+        }
+
+        FORCED_RESTOCK_CHUNKS.clear();
+        FORCED_RESTOCK_CHUNKS.addAll(updatedForcedChunks);
+    }
+
+    private static void releaseExpiredForcedRestockChunks(ServerWorld world) {
+        Set<ForcedRestockChunk> updatedForcedChunks = new HashSet<>();
+        for (ForcedRestockChunk forcedChunk : FORCED_RESTOCK_CHUNKS) {
+            if (forcedChunk.worldSeed() != world.getSeed()) {
+                updatedForcedChunks.add(forcedChunk);
+                continue;
+            }
+
+            if (forcedChunk.ticksLoaded() >= MAX_FORCED_RESTOCK_CHUNK_TICKS) {
+                world.setChunkForced(forcedChunk.chunkX(), forcedChunk.chunkZ(), false);
+                System.out.println("[Breached] Released expired force-loaded restock chunk "
+                        + forcedChunk.chunkX() + ", " + forcedChunk.chunkZ()
+                        + " for " + forcedChunk.placementKey() + ".");
+                continue;
+            }
+
+            updatedForcedChunks.add(forcedChunk.withAdditionalTick());
+        }
+
+        FORCED_RESTOCK_CHUNKS.clear();
+        FORCED_RESTOCK_CHUNKS.addAll(updatedForcedChunks);
+    }
+
+    private static int restockLootContainers(
+            ServerWorld world,
+            String placementKey,
+            List<BreachedStructurePlacementState.SavedLootContainer> lootContainers
+    ) {
+        int restockedContainers = 0;
+        for (BreachedStructurePlacementState.SavedLootContainer lootContainer : lootContainers) {
+            if (restockLootContainer(world, placementKey, lootContainer)) {
+                restockedContainers++;
+            }
+        }
+
+        return restockedContainers;
+    }
+
+    private static boolean restockLootContainer(
+            ServerWorld world,
+            String placementKey,
+            BreachedStructurePlacementState.SavedLootContainer lootContainer
+    ) {
+        BlockEntity blockEntity = world.getBlockEntity(lootContainer.pos());
+        if (!(blockEntity instanceof LootableInventory lootableInventory) || !(blockEntity instanceof Inventory inventory)) {
+            return false;
+        }
+
+        inventory.clear();
+        RegistryKey<LootTable> lootTableKey = RegistryKey.of(RegistryKeys.LOOT_TABLE, lootContainer.lootTableId());
+        lootableInventory.setLootTable(lootTableKey, createRestockLootSeed(world, placementKey, lootContainer));
+        inventory.markDirty();
+        world.updateListeners(lootContainer.pos(), world.getBlockState(lootContainer.pos()), world.getBlockState(lootContainer.pos()), 3);
+        return true;
+    }
+
+    private static long createRestockLootSeed(
+            ServerWorld world,
+            String placementKey,
+            BreachedStructurePlacementState.SavedLootContainer lootContainer
+    ) {
+        return world.getSeed()
+                ^ (world.getTime() * 31L)
+                ^ lootContainer.pos().asLong()
+                ^ placementKey.hashCode()
+                ^ lootContainer.lootTableSeed();
+    }
+
+    private static long createNextMajorLootRestockTime(ServerWorld world, String placementKey) {
+        BreachedConfig.MajorStructureLootSettings lootConfig = BreachedConfig.get().majorStructureLoot;
+        int intervalRange = lootConfig.maxRestockIntervalTicks - lootConfig.minRestockIntervalTicks;
+        java.util.Random random = new java.util.Random(
+                world.getSeed()
+                        ^ (world.getTime() * 0x9E3779B97F4A7C15L)
+                        ^ ((long) placementKey.hashCode() * 0xBF58476D1CE4E5B9L)
+        );
+        int interval = lootConfig.minRestockIntervalTicks;
+        if (intervalRange > 0) {
+            interval += random.nextInt(intervalRange + 1);
+        }
+
+        return world.getTime() + interval;
+    }
+
+    private static int countPlacedMinorPois(BreachedStructurePlacementState state) {
+        int placed = 0;
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
+            Optional<BreachedStructureDefinition> definition = getBaseDefinition(structureKey(placement.getKey()));
+            if (definition.isPresent() && definition.get().spacingGroup() == BreachedStructureDefinition.SpacingGroup.MINOR) {
+                placed++;
+            }
+        }
+
+        return placed;
+    }
+
+    private static SpacingEvaluation evaluateMinorPoiCenterSpacing(
+            BreachedStructurePlacementState state,
+            BreachedStructureDefinition definition,
+            String placementKey,
+            int centerX,
+            int centerZ
+    ) {
+        BreachedConfig.MinorPoiSettings minorPoiConfig = BreachedConfig.get().minorPoi;
+        int minimumSpacing = Math.max(
+                Math.max(0, definition.minimumSpacingFromBreachedStructures()),
+                minorPoiConfig.hardMinimumSpacing
+        );
+        int preferredSpacing = Math.max(minimumSpacing, definition.preferredSpacingFromBreachedStructures());
+        if (minimumSpacing <= 0 && preferredSpacing <= 0) {
+            return new SpacingEvaluation(true, 0.0D, null);
+        }
+
+        double penalty = 0.0D;
+        long minimumSpacingSquared = (long) minimumSpacing * minimumSpacing;
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
+            if (placement.getKey().equals(placementKey)) {
+                continue;
+            }
+
+            Optional<BreachedStructureDefinition> otherDefinition = getBaseDefinition(structureKey(placement.getKey()));
+            if (otherDefinition.isEmpty() || otherDefinition.get().spacingGroup() != BreachedStructureDefinition.SpacingGroup.MINOR) {
+                continue;
+            }
+
+            long xDistance = centerX - placement.getValue().centerX();
+            long zDistance = centerZ - placement.getValue().centerZ();
+            long distanceSquared = xDistance * xDistance + zDistance * zDistance;
+            if (distanceSquared < minimumSpacingSquared) {
+                return new SpacingEvaluation(false, Double.MAX_VALUE, "too close to existing minor POI "
+                        + structureKey(placement.getKey())
+                        + " at x " + placement.getValue().centerX()
+                        + ", z " + placement.getValue().centerZ()
+                        + "; minimum spacing " + minimumSpacing);
+            }
+
+            double distance = Math.sqrt(distanceSquared);
+            if (distance < preferredSpacing) {
+                penalty += preferredSpacing - distance;
+            }
+        }
+
+        return new SpacingEvaluation(true, penalty, null);
+    }
+
+    private static boolean isMinorPoiSpreadCellFull(BreachedStructurePlacementState state, int x, int z) {
+        BreachedConfig.MinorPoiSettings minorPoiConfig = BreachedConfig.get().minorPoi;
+        return countPlacedMinorPoisInSpreadCell(state, x, z, minorPoiConfig.spreadCellSizeBlocks) >= minorPoiConfig.maxPerSpreadCell;
+    }
+
+    private static int countPlacedMinorPoisInSpreadCell(
+            BreachedStructurePlacementState state,
+            int x,
+            int z,
+            int spreadCellSizeBlocks
+    ) {
+        int cellX = spreadCellCoordinate(x, spreadCellSizeBlocks);
+        int cellZ = spreadCellCoordinate(z, spreadCellSizeBlocks);
+        int placed = 0;
+
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
+            Optional<BreachedStructureDefinition> definition = getBaseDefinition(structureKey(placement.getKey()));
+            if (definition.isEmpty() || definition.get().spacingGroup() != BreachedStructureDefinition.SpacingGroup.MINOR) {
+                continue;
+            }
+
+            if (spreadCellCoordinate(placement.getValue().centerX(), spreadCellSizeBlocks) == cellX
+                    && spreadCellCoordinate(placement.getValue().centerZ(), spreadCellSizeBlocks) == cellZ) {
+                placed++;
+            }
+        }
+
+        return placed;
+    }
+
+    private static int spreadCellCoordinate(int coordinate, int spreadCellSizeBlocks) {
+        return Math.floorDiv(coordinate, Math.max(1, spreadCellSizeBlocks));
+    }
+
+    private static int getMinorPoiBudget(ServerWorld world) {
+        BreachedConfig.MinorPoiSettings minorPoiConfig = BreachedConfig.get().minorPoi;
+        Optional<BreachedDimensionRules.BreachedPreset> preset = BreachedDimensionRules.getBreachedPreset(world.getServer());
+        if (preset.isPresent() && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL) {
+            return minorPoiConfig.smallWorldBudget;
+        }
+
+        return minorPoiConfig.standardWorldBudget;
     }
 
     private static int countReservedOrPlacedStructures(BreachedStructurePlacementState state, String structureKey) {
@@ -921,6 +1564,13 @@ public final class BreachedStructurePlacementManager {
 
     private static Optional<BreachedStructureDefinition> getBaseDefinition(String structureKey) {
         return BreachedStructureDefinitions.ALL_STRUCTURES.stream()
+                .filter(definition -> BreachedStructureDefinitions.key(definition).equals(structureKey))
+                .findFirst();
+    }
+
+    private static Optional<BreachedStructureDefinition> getMajorDefinition(String placementKey) {
+        String structureKey = structureKey(placementKey);
+        return BreachedStructureDefinitions.PLANNED_STRUCTURES.stream()
                 .filter(definition -> BreachedStructureDefinitions.key(definition).equals(structureKey))
                 .findFirst();
     }
@@ -1121,6 +1771,60 @@ public final class BreachedStructurePlacementManager {
     ) {
     }
 
+    private record PlannedCandidateEvaluation(
+            PendingStructurePlacement pendingPlacement,
+            StructureTemplate template,
+            BreachedStructureSite site,
+            double score,
+            PlacementAttemptResult result
+    ) {
+    }
+
+    private record MinorPoiLocalCandidate(int x, int z) {
+    }
+
+    private record MinorPoiPlacementChoice(
+            BreachedStructureDefinition definition,
+            String placementKey,
+            StructureTemplate template,
+            BreachedStructureSpawnManager.RadiusCandidate candidate,
+            BreachedStructureSite site,
+            int originX,
+            int originZ,
+            double score
+    ) {
+        private static final MinorPoiPlacementChoice NOT_READY = new MinorPoiPlacementChoice(
+                null,
+                "",
+                null,
+                null,
+                null,
+                0,
+                0,
+                Double.MAX_VALUE
+        );
+        private static final MinorPoiPlacementChoice SPREAD_CELL_FULL = new MinorPoiPlacementChoice(
+                null,
+                "",
+                null,
+                null,
+                null,
+                0,
+                0,
+                Double.MAX_VALUE
+        );
+        private static final MinorPoiPlacementChoice SPACING_BLOCKED = new MinorPoiPlacementChoice(
+                null,
+                "",
+                null,
+                null,
+                null,
+                0,
+                0,
+                Double.MAX_VALUE
+        );
+    }
+
     private record PendingMinorPoiChunk(long worldSeed, int chunkX, int chunkZ) {
     }
 
@@ -1149,11 +1853,29 @@ public final class BreachedStructurePlacementManager {
         }
     }
 
+    private record ForcedRestockChunk(
+            long worldSeed,
+            String placementKey,
+            int chunkX,
+            int chunkZ,
+            int ticksLoaded
+    ) {
+        private ForcedRestockChunk(long worldSeed, String placementKey, int chunkX, int chunkZ) {
+            this(worldSeed, placementKey, chunkX, chunkZ, 0);
+        }
+
+        private ForcedRestockChunk withAdditionalTick() {
+            return new ForcedRestockChunk(worldSeed, placementKey, chunkX, chunkZ, ticksLoaded + 1);
+        }
+    }
+
     private enum PlacementAttemptResult {
+        READY,
         PLACED,
         HANDLED,
         FAILED,
-        SKIPPED
+        SKIPPED,
+        NOT_READY
     }
 
     private enum MinorPoiAttemptResult {

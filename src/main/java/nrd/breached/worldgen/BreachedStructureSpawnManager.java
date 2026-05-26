@@ -6,9 +6,11 @@ import net.minecraft.block.Block;
 import net.minecraft.inventory.LootableInventory;
 import net.minecraft.loot.LootTable;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtList;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.state.property.Properties;
 import net.minecraft.structure.StructurePlacementData;
 import net.minecraft.structure.StructureTemplate;
 import net.minecraft.structure.processor.BlockIgnoreStructureProcessor;
@@ -23,8 +25,10 @@ import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public final class BreachedStructureSpawnManager {
     public static final BreachedStructureDefinition CENTRAL_SPAWN = BreachedStructureDefinitions.SWORD_STATUE;
@@ -254,16 +258,12 @@ public final class BreachedStructureSpawnManager {
         ChunkPos chunkPos = new ChunkPos(pos);
         world.getChunk(chunkPos.x, chunkPos.z);
 
-        StructurePlacementData placementData = new StructurePlacementData()
-                .setMirror(mirror)
-                .setRotation(rotation)
-                .setIgnoreEntities(false)
-                .setUpdateNeighbors(true);
-        if (definition.airPlacementMode() == BreachedStructureDefinition.AirPlacementMode.IGNORE_AIR) {
-            placementData.addProcessor(BlockIgnoreStructureProcessor.IGNORE_AIR);
-        }
+        StructurePlacementData placementData = createPlacementData(definition, mirror, rotation);
 
         template.place(world, pos, pos, placementData, Random.create(world.getSeed()), BLOCK_UPDATE_FLAGS);
+        NbtCompound templateNbt = template.writeNbt(new NbtCompound());
+        removePlacedTemplateWaterlogging(world, templateNbt, pos, placementData);
+        applyJigsawAirMarkers(world, templateNbt, pos, placementData);
         applyTemplateLootTables(world, template, pos, placementData);
 
         BreachedStructurePlacement placement = new BreachedStructurePlacement(
@@ -278,6 +278,34 @@ public final class BreachedStructureSpawnManager {
         );
         logPlacement(placement, mirror, rotation);
         return placement;
+    }
+
+    public static List<TemplateLootContainer> getTemplateLootContainers(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BlockPos pos,
+            BlockMirror mirror,
+            BlockRotation rotation
+    ) {
+        return getTemplateLootContainers(world, template, pos, createPlacementData(definition, mirror, rotation));
+    }
+
+    private static StructurePlacementData createPlacementData(
+            BreachedStructureDefinition definition,
+            BlockMirror mirror,
+            BlockRotation rotation
+    ) {
+        StructurePlacementData placementData = new StructurePlacementData()
+                .setMirror(mirror)
+                .setRotation(rotation)
+                .setIgnoreEntities(false)
+                .setUpdateNeighbors(true);
+        if (definition.airPlacementMode() == BreachedStructureDefinition.AirPlacementMode.IGNORE_AIR) {
+            placementData.addProcessor(BlockIgnoreStructureProcessor.IGNORE_AIR);
+        }
+
+        return placementData;
     }
 
     public static Vec3i getRotatedSize(Vec3i size, BlockRotation rotation) {
@@ -346,6 +374,97 @@ public final class BreachedStructureSpawnManager {
         return Math.floorDiv((int) Math.round(coordinate), 16) * 16 + 8;
     }
 
+    private static void applyJigsawAirMarkers(
+            ServerWorld world,
+            NbtCompound templateNbt,
+            BlockPos pos,
+            StructurePlacementData placementData
+    ) {
+        Set<Integer> jigsawStateIds = getJigsawStateIds(templateNbt);
+        if (jigsawStateIds.isEmpty()) {
+            return;
+        }
+
+        int clearedBlocks = 0;
+        NbtList blocks = templateNbt.getListOrEmpty("blocks");
+        for (int index = 0; index < blocks.size(); index++) {
+            NbtCompound blockNbt = blocks.getCompoundOrEmpty(index);
+            if (!jigsawStateIds.contains(blockNbt.getInt("state", -1))) {
+                continue;
+            }
+
+            NbtList markerPos = blockNbt.getListOrEmpty("pos");
+            BlockPos relativePos = new BlockPos(
+                    markerPos.getInt(0, 0),
+                    markerPos.getInt(1, 0),
+                    markerPos.getInt(2, 0)
+            );
+            BlockPos markerWorldPos = StructureTemplate.transform(placementData, relativePos).add(pos);
+            world.setBlockState(markerWorldPos, Blocks.AIR.getDefaultState(), BLOCK_UPDATE_FLAGS);
+            clearedBlocks++;
+        }
+
+        if (clearedBlocks > 0) {
+            System.out.println("[Breached] Cleared " + clearedBlocks + " jigsaw air markers.");
+        }
+    }
+
+    private static void removePlacedTemplateWaterlogging(
+            ServerWorld world,
+            NbtCompound templateNbt,
+            BlockPos pos,
+            StructurePlacementData placementData
+    ) {
+        int fixedBlocks = 0;
+        NbtList blocks = templateNbt.getListOrEmpty("blocks");
+        for (int index = 0; index < blocks.size(); index++) {
+            NbtCompound blockNbt = blocks.getCompoundOrEmpty(index);
+            NbtList blockPos = blockNbt.getListOrEmpty("pos");
+            BlockPos relativePos = new BlockPos(
+                    blockPos.getInt(0, 0),
+                    blockPos.getInt(1, 0),
+                    blockPos.getInt(2, 0)
+            );
+            BlockPos worldPos = StructureTemplate.transform(placementData, relativePos).add(pos);
+            BlockState state = world.getBlockState(worldPos);
+            if (state.contains(Properties.WATERLOGGED) && state.get(Properties.WATERLOGGED)) {
+                world.setBlockState(worldPos, state.with(Properties.WATERLOGGED, false), BLOCK_UPDATE_FLAGS);
+                fixedBlocks++;
+            }
+        }
+
+        if (fixedBlocks > 0) {
+            System.out.println("[Breached] Removed waterlogging from " + fixedBlocks + " placed structure blocks.");
+        }
+    }
+
+    private static Set<Integer> getJigsawStateIds(NbtCompound templateNbt) {
+        Set<Integer> stateIds = new HashSet<>();
+        NbtList palette = getPrimaryPalette(templateNbt);
+        for (int index = 0; index < palette.size(); index++) {
+            NbtCompound stateNbt = palette.getCompoundOrEmpty(index);
+            if ("minecraft:jigsaw".equals(stateNbt.getString("Name", ""))) {
+                stateIds.add(index);
+            }
+        }
+
+        return stateIds;
+    }
+
+    private static NbtList getPrimaryPalette(NbtCompound templateNbt) {
+        NbtList palette = templateNbt.getListOrEmpty("palette");
+        if (!palette.isEmpty()) {
+            return palette;
+        }
+
+        NbtList palettes = templateNbt.getListOrEmpty("palettes");
+        if (!palettes.isEmpty()) {
+            return palettes.getListOrEmpty(0);
+        }
+
+        return palette;
+    }
+
     private static void applyTemplateLootTables(
             ServerWorld world,
             StructureTemplate template,
@@ -354,6 +473,28 @@ public final class BreachedStructureSpawnManager {
     ) {
         int appliedLootTables = 0;
 
+        for (TemplateLootContainer container : getTemplateLootContainers(world, template, pos, placementData)) {
+            if (!(world.getBlockEntity(container.pos()) instanceof LootableInventory lootableInventory)) {
+                continue;
+            }
+
+            RegistryKey<LootTable> lootTableKey = RegistryKey.of(RegistryKeys.LOOT_TABLE, container.lootTableId());
+            lootableInventory.setLootTable(lootTableKey, container.lootTableSeed());
+            appliedLootTables++;
+        }
+
+        if (appliedLootTables > 0) {
+            System.out.println("[Breached] Applied " + appliedLootTables + " template container loot tables.");
+        }
+    }
+
+    private static List<TemplateLootContainer> getTemplateLootContainers(
+            ServerWorld world,
+            StructureTemplate template,
+            BlockPos pos,
+            StructurePlacementData placementData
+    ) {
+        List<TemplateLootContainer> lootContainers = new ArrayList<>();
         for (Block block : LOOTABLE_TEMPLATE_BLOCKS) {
             for (StructureTemplate.StructureBlockInfo blockInfo : template.getInfosForBlock(pos, placementData, block, true)) {
                 NbtCompound nbt = blockInfo.nbt();
@@ -372,15 +513,11 @@ public final class BreachedStructureSpawnManager {
                 }
 
                 long lootTableSeed = nbt.getLong("LootTableSeed", 0L);
-                RegistryKey<LootTable> lootTableKey = RegistryKey.of(RegistryKeys.LOOT_TABLE, lootTableId);
-                lootableInventory.setLootTable(lootTableKey, lootTableSeed);
-                appliedLootTables++;
+                lootContainers.add(new TemplateLootContainer(blockInfo.pos(), lootTableId, lootTableSeed));
             }
         }
 
-        if (appliedLootTables > 0) {
-            System.out.println("[Breached] Applied " + appliedLootTables + " template container loot tables.");
-        }
+        return lootContainers;
     }
 
     private static void logPlacement(BreachedStructurePlacement placement, BlockMirror mirror, BlockRotation rotation) {
@@ -398,5 +535,8 @@ public final class BreachedStructureSpawnManager {
     }
 
     public record RadiusCandidate(int index, int x, int z, int radius, double angle) {
+    }
+
+    public record TemplateLootContainer(BlockPos pos, Identifier lootTableId, long lootTableSeed) {
     }
 }

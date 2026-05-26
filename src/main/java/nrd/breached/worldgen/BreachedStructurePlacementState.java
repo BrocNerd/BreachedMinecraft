@@ -3,12 +3,17 @@ package nrd.breached.worldgen;
 import com.mojang.serialization.Codec;
 import net.minecraft.datafixer.DataFixTypes;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtList;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.PersistentState;
 import net.minecraft.world.PersistentStateType;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -23,10 +28,17 @@ public class BreachedStructurePlacementState extends PersistentState {
     private static final String ORIGIN_Y_KEY = "origin_y";
     private static final String ORIGIN_Z_KEY = "origin_z";
     private static final String PLACED_TIME_KEY = "placed_time";
+    private static final String LOOT_CONTAINERS_KEY = "loot_containers";
+    private static final String LOOT_CONTAINERS_SCANNED_KEY = "loot_containers_scanned";
+    private static final String LAST_RESTOCK_TIME_KEY = "last_restock_time";
+    private static final String NEXT_RESTOCK_TIME_KEY = "next_restock_time";
     private static final String STRUCTURE_KEY = "structure_key";
     private static final String CANDIDATE_INDEX_KEY = "candidate_index";
     private static final String X_KEY = "x";
+    private static final String Y_KEY = "y";
     private static final String Z_KEY = "z";
+    private static final String LOOT_TABLE_KEY = "loot_table";
+    private static final String LOOT_TABLE_SEED_KEY = "loot_table_seed";
     private static final Codec<BreachedStructurePlacementState> CODEC = NbtCompound.CODEC.xmap(
             BreachedStructurePlacementState::fromNbt,
             BreachedStructurePlacementState::toNbt
@@ -89,19 +101,118 @@ public class BreachedStructurePlacementState extends PersistentState {
     }
 
     public void markPlaced(String key, BreachedStructurePlacement placement, long placedTime) {
+        markPlaced(key, placement, placedTime, List.of(), false);
+    }
+
+    public void markPlaced(
+            String key,
+            BreachedStructurePlacement placement,
+            long placedTime,
+            List<SavedLootContainer> lootContainers
+    ) {
+        markPlaced(key, placement, placedTime, lootContainers, placedTime);
+    }
+
+    public void markPlaced(
+            String key,
+            BreachedStructurePlacement placement,
+            long placedTime,
+            List<SavedLootContainer> lootContainers,
+            long nextRestockTime
+    ) {
+        markPlaced(key, placement, placedTime, lootContainers, true, nextRestockTime);
+    }
+
+    private void markPlaced(
+            String key,
+            BreachedStructurePlacement placement,
+            long placedTime,
+            List<SavedLootContainer> lootContainers,
+            boolean lootContainersScanned
+    ) {
+        markPlaced(key, placement, placedTime, lootContainers, lootContainersScanned, placedTime);
+    }
+
+    private void markPlaced(
+            String key,
+            BreachedStructurePlacement placement,
+            long placedTime,
+            List<SavedLootContainer> lootContainers,
+            boolean lootContainersScanned,
+            long nextRestockTime
+    ) {
         placements.put(key, new SavedPlacement(
                 BreachedStructureSpawnManager.getProtectedCenterX(placement),
                 BreachedStructureSpawnManager.getProtectedCenterZ(placement),
                 placement.origin().getX(),
                 placement.origin().getY(),
                 placement.origin().getZ(),
-                placedTime
+                placedTime,
+                lootContainers,
+                lootContainersScanned,
+                placedTime,
+                nextRestockTime
         ));
         markDirty();
     }
 
     public void markPlaced(String key, int centerX, int centerZ) {
-        placements.put(key, new SavedPlacement(centerX, centerZ, centerX, 0, centerZ, 0L));
+        placements.put(key, new SavedPlacement(centerX, centerZ, centerX, 0, centerZ, 0L, List.of(), false, 0L, 0L));
+        markDirty();
+    }
+
+    public void setLootContainers(String key, List<SavedLootContainer> lootContainers, long lastRestockTime) {
+        setLootContainers(key, lootContainers, lastRestockTime, lastRestockTime);
+    }
+
+    public void setLootContainers(
+            String key,
+            List<SavedLootContainer> lootContainers,
+            long lastRestockTime,
+            long nextRestockTime
+    ) {
+        SavedPlacement placement = placements.get(key);
+        if (placement == null) {
+            return;
+        }
+
+        placements.put(key, new SavedPlacement(
+                placement.centerX(),
+                placement.centerZ(),
+                placement.originX(),
+                placement.originY(),
+                placement.originZ(),
+                placement.placedTime(),
+                lootContainers,
+                true,
+                lastRestockTime,
+                nextRestockTime
+        ));
+        markDirty();
+    }
+
+    public void markLootRestocked(String key, long lastRestockTime) {
+        markLootRestocked(key, lastRestockTime, lastRestockTime);
+    }
+
+    public void markLootRestocked(String key, long lastRestockTime, long nextRestockTime) {
+        SavedPlacement placement = placements.get(key);
+        if (placement == null) {
+            return;
+        }
+
+        placements.put(key, new SavedPlacement(
+                placement.centerX(),
+                placement.centerZ(),
+                placement.originX(),
+                placement.originY(),
+                placement.originZ(),
+                placement.placedTime(),
+                placement.lootContainers(),
+                placement.lootContainersScanned(),
+                lastRestockTime,
+                nextRestockTime
+        ));
         markDirty();
     }
 
@@ -120,6 +231,21 @@ public class BreachedStructurePlacementState extends PersistentState {
             placementNbt.putInt(ORIGIN_Y_KEY, placement.originY());
             placementNbt.putInt(ORIGIN_Z_KEY, placement.originZ());
             placementNbt.putLong(PLACED_TIME_KEY, placement.placedTime());
+            placementNbt.putBoolean(LOOT_CONTAINERS_SCANNED_KEY, placement.lootContainersScanned());
+            placementNbt.putLong(LAST_RESTOCK_TIME_KEY, placement.lastRestockTime());
+            placementNbt.putLong(NEXT_RESTOCK_TIME_KEY, placement.nextRestockTime());
+
+            NbtList lootContainerList = new NbtList();
+            for (SavedLootContainer lootContainer : placement.lootContainers()) {
+                NbtCompound lootContainerNbt = new NbtCompound();
+                lootContainerNbt.putInt(X_KEY, lootContainer.pos().getX());
+                lootContainerNbt.putInt(Y_KEY, lootContainer.pos().getY());
+                lootContainerNbt.putInt(Z_KEY, lootContainer.pos().getZ());
+                lootContainerNbt.putString(LOOT_TABLE_KEY, lootContainer.lootTableId().toString());
+                lootContainerNbt.putLong(LOOT_TABLE_SEED_KEY, lootContainer.lootTableSeed());
+                lootContainerList.add(lootContainerNbt);
+            }
+            placementNbt.put(LOOT_CONTAINERS_KEY, lootContainerList);
             placementRoot.put(entry.getKey(), placementNbt);
         }
 
@@ -158,13 +284,19 @@ public class BreachedStructurePlacementState extends PersistentState {
                     continue;
                 }
 
+                long placedTime = placementNbt.get().getLong(PLACED_TIME_KEY, 0L);
+                long lastRestockTime = placementNbt.get().getLong(LAST_RESTOCK_TIME_KEY, placedTime);
                 state.placements.put(key, new SavedPlacement(
                         placementNbt.get().getInt(CENTER_X_KEY, 0),
                         placementNbt.get().getInt(CENTER_Z_KEY, 0),
                         placementNbt.get().getInt(ORIGIN_X_KEY, 0),
                         placementNbt.get().getInt(ORIGIN_Y_KEY, 0),
                         placementNbt.get().getInt(ORIGIN_Z_KEY, 0),
-                        placementNbt.get().getLong(PLACED_TIME_KEY, 0L)
+                        placedTime,
+                        readLootContainers(placementNbt.get()),
+                        placementNbt.get().getBoolean(LOOT_CONTAINERS_SCANNED_KEY, false),
+                        lastRestockTime,
+                        placementNbt.get().getLong(NEXT_RESTOCK_TIME_KEY, lastRestockTime)
                 ));
             }
         }
@@ -209,7 +341,53 @@ public class BreachedStructurePlacementState extends PersistentState {
         return state;
     }
 
-    public record SavedPlacement(int centerX, int centerZ, int originX, int originY, int originZ, long placedTime) {
+    private static List<SavedLootContainer> readLootContainers(NbtCompound placementNbt) {
+        List<SavedLootContainer> lootContainers = new ArrayList<>();
+        NbtList lootContainerList = placementNbt.getListOrEmpty(LOOT_CONTAINERS_KEY);
+        for (int index = 0; index < lootContainerList.size(); index++) {
+            NbtCompound lootContainerNbt = lootContainerList.getCompoundOrEmpty(index);
+            Optional<String> lootTableValue = lootContainerNbt.getString(LOOT_TABLE_KEY);
+            if (lootTableValue.isEmpty()) {
+                continue;
+            }
+
+            Identifier lootTableId = Identifier.tryParse(lootTableValue.get());
+            if (lootTableId == null) {
+                continue;
+            }
+
+            lootContainers.add(new SavedLootContainer(
+                    new BlockPos(
+                            lootContainerNbt.getInt(X_KEY, 0),
+                            lootContainerNbt.getInt(Y_KEY, 0),
+                            lootContainerNbt.getInt(Z_KEY, 0)
+                    ),
+                    lootTableId,
+                    lootContainerNbt.getLong(LOOT_TABLE_SEED_KEY, 0L)
+            ));
+        }
+
+        return lootContainers;
+    }
+
+    public record SavedPlacement(
+            int centerX,
+            int centerZ,
+            int originX,
+            int originY,
+            int originZ,
+            long placedTime,
+            List<SavedLootContainer> lootContainers,
+            boolean lootContainersScanned,
+            long lastRestockTime,
+            long nextRestockTime
+    ) {
+        public SavedPlacement {
+            lootContainers = List.copyOf(lootContainers);
+        }
+    }
+
+    public record SavedLootContainer(BlockPos pos, Identifier lootTableId, long lootTableSeed) {
     }
 
     public record ReservedPlacement(String structureKey, int candidateIndex, int x, int z) {

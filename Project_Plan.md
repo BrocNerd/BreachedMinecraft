@@ -32,7 +32,7 @@ Tier 3 - Netherite. Updated recipe to 1 beacon 5 diamond blocks and 1 netherite 
 
 Landlock Block to claim chunks:
 
-Phase 6 — Breachers
+Breachers:
 
 Goal:
 Add special raid tools called Breachers that allow unauthorized players to break blocks inside Landlock claims.
@@ -89,17 +89,15 @@ Revamped Loot Tables:
 Loot spawns are now capped at Tier 2 workbench levels. (if people find enough enchanted books to anvil them up, so be it. Thats a good alternative way to gear up.)
 
 Loot Locations:
-Include dungeons and taverns with updated loot pools to match.
+Include structures with updated loot pools to match.
 Ensure Major structures spawn including:
-Ancient City
-Nether Fortress (Increase whither skeleton spawn rate by 2x and increase wither skeleton skull drop rate by 2x)
-Nether Bastion
-Ocean Monument
+THIS DESCRIPTION IS MISSING NEW/UPDATED FEATURES. NEEDS UPDATED IN WORDS.
+
 
 World Border:
 Make world an island that is always around 2000x2000 blocks for compact/small teams. (total map size 2500x2500 - allows for ocean builds and increased ore spawns in ocean.)
 Nether border is divided by 8. So 312x312. Makes potions/nether very hard. Make only two nether entrances somewhere random on map with 32x32 block unclaimable area and remove individual nether portal creation.
-No End. (For now)
+No End. THIS DESCRIPTION IS OLD. CURRENT IMPLEMENTATION IS BETTER THAN THIS CONCEPT.
 
 Respawn:
 
@@ -159,7 +157,7 @@ Notes:
 
 
 Phase 12 — Structures and Exploration
-Goal: Add Breached specific structures including Nether Portals and End portals, along with dungeons, taverns, and other POI's that contain loot from 3 tiered loot pools.
+Goal: Add Breached specific structures including Nether Portals and End portals, along with dungeons, taverns, and other POI's that contain loot from 3 tiered loot pools. Ensure natural generation of structures and POI's. Keep them spread out, but ensure major POI's always spawn.
 Notes:
 
 Phase 13 — Anti-Cheese Rules
