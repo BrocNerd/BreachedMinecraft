@@ -49,6 +49,7 @@ public final class BreachedStructurePlacementManager {
     private static final int MAX_FORCED_CHUNK_TICKS = 200;
     private static final int MAX_FORCED_RESTOCK_CHUNK_TICKS = 200;
     private static final int MAX_FORCED_MINOR_DESPAWN_CHUNK_TICKS = 200;
+    private static final int MAX_PLANNED_STRUCTURE_COMPLETIONS_PER_TICK = 1;
     private static final int REMOVE_BLOCK_WITHOUT_DROPS_FLAGS = Block.NOTIFY_LISTENERS | Block.SKIP_DROPS;
     private static final int MINOR_POI_PLAYER_REPLACED_BLOCK_PERCENT = 25;
     private static final int MINOR_POI_CHUNK_INSET = 2;
@@ -57,6 +58,7 @@ public final class BreachedStructurePlacementManager {
     private static final Set<ForcedRestockChunk> FORCED_RESTOCK_CHUNKS = new HashSet<>();
     private static final Set<ForcedMinorDespawnChunk> FORCED_MINOR_DESPAWN_CHUNKS = new HashSet<>();
     private static final Set<PendingMinorPoiChunk> PENDING_MINOR_POI_CHUNKS = new HashSet<>();
+    private static final Set<Long> COMPLETED_PLANNED_STRUCTURE_WORLDS = new HashSet<>();
 
     private BreachedStructurePlacementManager() {
     }
@@ -68,7 +70,13 @@ public final class BreachedStructurePlacementManager {
     }
 
     private static void handleChunkLoad(ServerWorld world, WorldChunk chunk) {
-        enqueuePlannedStructures(world, chunk);
+        if (!isStructurePlacementWorld(world)) {
+            return;
+        }
+
+        if (!COMPLETED_PLANNED_STRUCTURE_WORLDS.contains(world.getSeed())) {
+            enqueuePlannedStructures(world, chunk);
+        }
         ChunkPos chunkPos = chunk.getPos();
         PENDING_MINOR_POI_CHUNKS.add(new PendingMinorPoiChunk(world.getSeed(), chunkPos.x, chunkPos.z));
     }
@@ -106,22 +114,57 @@ public final class BreachedStructurePlacementManager {
     }
 
     private static void placePendingStructures(ServerWorld world) {
-        BreachedStructurePlacementState state = BreachedStructurePlacementState.get(world.getServer());
-        migrateLegacyCentralSpawnState(world, state);
-        reservePlannedStructures(world, state);
-        forceLoadRequiredReservedChunks(world, state);
-        releaseCompletedForcedChunks(world, state);
-        despawnAndRetireMinorPois(world, state);
-        releaseExpiredForcedMinorDespawnChunks(world, state);
-        tryPlacePendingMinorPoiChunks(world, state);
-        tryPlaceMinorPoisNearPlayers(world, state);
-        restockMajorStructureLoot(world, state);
-        releaseExpiredForcedRestockChunks(world);
-
-        if (PENDING_PLACEMENTS.isEmpty()) {
+        if (!isStructurePlacementWorld(world)) {
             return;
         }
 
+        boolean hasScheduledWork = hasScheduledPlacementWork(world);
+        if (!hasScheduledWork && COMPLETED_PLANNED_STRUCTURE_WORLDS.contains(world.getSeed())) {
+            return;
+        }
+
+        BreachedStructurePlacementState state = BreachedStructurePlacementState.get(world.getServer());
+        migrateLegacyCentralSpawnState(world, state);
+
+        boolean hasForcedStructureChunks = hasForcedStructureChunksForWorld(world);
+        boolean hasPlannedWork = !COMPLETED_PLANNED_STRUCTURE_WORLDS.contains(world.getSeed())
+                && hasPlannedStructureWork(world, state);
+        if (hasPlannedWork) {
+            COMPLETED_PLANNED_STRUCTURE_WORLDS.remove(world.getSeed());
+        } else {
+            COMPLETED_PLANNED_STRUCTURE_WORLDS.add(world.getSeed());
+        }
+
+        if (!hasScheduledWork && !hasPlannedWork) {
+            return;
+        }
+
+        if (hasPlannedWork || hasPendingMajorPlacementsForWorld(world) || hasForcedStructureChunks) {
+            reservePlannedStructures(world, state);
+            forceLoadRequiredReservedChunks(world, state);
+            releaseCompletedForcedChunks(world, state);
+        }
+
+        if (isMinorPoiDespawnScanDue(world) || hasForcedMinorDespawnChunksForWorld(world)) {
+            despawnAndRetireMinorPois(world, state);
+            releaseExpiredForcedMinorDespawnChunks(world, state);
+        }
+        if (hasPendingMinorPoiChunksForWorld(world)) {
+            tryPlacePendingMinorPoiChunks(world, state);
+        }
+        if (isMinorPoiPlayerScanDue(world)) {
+            tryPlaceMinorPoisNearPlayers(world, state);
+        }
+        if (isMajorRestockScanDue(world) || hasForcedRestockChunksForWorld(world)) {
+            restockMajorStructureLoot(world, state);
+            releaseExpiredForcedRestockChunks(world);
+        }
+
+        if (!hasPendingMajorPlacementsForWorld(world)) {
+            return;
+        }
+
+        int completedPlannedStructures = 0;
         for (BreachedStructureDefinition definition : BreachedStructureDefinitions.PLANNED_STRUCTURES) {
             BreachedStructureDefinition activeDefinition = getActiveDefinition(world, definition);
             if (!world.getRegistryKey().equals(activeDefinition.requiredDimension())) {
@@ -185,6 +228,10 @@ public final class BreachedStructurePlacementManager {
             }
 
             if (handledPlacement) {
+                completedPlannedStructures++;
+                if (completedPlannedStructures >= MAX_PLANNED_STRUCTURE_COMPLETIONS_PER_TICK) {
+                    return;
+                }
                 continue;
             }
 
@@ -192,6 +239,10 @@ public final class BreachedStructurePlacementManager {
                 placeEvaluatedPlannedCandidate(world, state, activeDefinition, bestEvaluation);
                 if (countPlacedStructures(state, structureKey) >= activeDefinition.countPerWorld()) {
                     PENDING_PLACEMENTS.removeIf(pending -> pending.worldSeed() == world.getSeed() && pending.structureKey().equals(structureKey));
+                }
+                completedPlannedStructures++;
+                if (completedPlannedStructures >= MAX_PLANNED_STRUCTURE_COMPLETIONS_PER_TICK) {
+                    return;
                 }
                 continue;
             }
@@ -204,6 +255,96 @@ public final class BreachedStructurePlacementManager {
                         + " planned candidates for " + structureKey + ".");
             }
         }
+    }
+
+    private static boolean isStructurePlacementWorld(ServerWorld world) {
+        return world.getRegistryKey().equals(World.OVERWORLD);
+    }
+
+    private static boolean hasScheduledPlacementWork(ServerWorld world) {
+        return hasPendingMajorPlacementsForWorld(world)
+                || hasPendingMinorPoiChunksForWorld(world)
+                || hasForcedStructureChunksForWorld(world)
+                || hasForcedMinorDespawnChunksForWorld(world)
+                || hasForcedRestockChunksForWorld(world)
+                || isMinorPoiDespawnScanDue(world)
+                || isMinorPoiPlayerScanDue(world)
+                || isMajorRestockScanDue(world);
+    }
+
+    private static boolean hasPlannedStructureWork(ServerWorld world, BreachedStructurePlacementState state) {
+        for (BreachedStructureDefinition definition : BreachedStructureDefinitions.PLANNED_STRUCTURES) {
+            BreachedStructureDefinition activeDefinition = getActiveDefinition(world, definition);
+            if (!world.getRegistryKey().equals(activeDefinition.requiredDimension())) {
+                continue;
+            }
+
+            String structureKey = BreachedStructureDefinitions.key(activeDefinition);
+            if (countPlacedStructures(state, structureKey) >= activeDefinition.countPerWorld()) {
+                continue;
+            }
+
+            if (hasOpenReservedPlacement(state, structureKey)) {
+                return true;
+            }
+
+            if (countReservedOrPlacedStructures(state, structureKey) < activeDefinition.countPerWorld()
+                    && hasRemainingCandidates(world, state, activeDefinition, structureKey)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static boolean hasOpenReservedPlacement(BreachedStructurePlacementState state, String structureKey) {
+        for (Map.Entry<String, BreachedStructurePlacementState.ReservedPlacement> reservation : state.reservations()) {
+            if (isPlacementForStructure(reservation.getKey(), structureKey)
+                    && !state.hasPlacement(reservation.getKey())
+                    && !state.hasFailedCandidate(structureKey, reservation.getValue().candidateIndex())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static boolean hasPendingMajorPlacementsForWorld(ServerWorld world) {
+        return PENDING_PLACEMENTS.stream()
+                .anyMatch(placement -> placement.worldSeed() == world.getSeed());
+    }
+
+    private static boolean hasPendingMinorPoiChunksForWorld(ServerWorld world) {
+        return PENDING_MINOR_POI_CHUNKS.stream()
+                .anyMatch(pendingChunk -> pendingChunk.worldSeed() == world.getSeed());
+    }
+
+    private static boolean hasForcedStructureChunksForWorld(ServerWorld world) {
+        return FORCED_CHUNKS.stream()
+                .anyMatch(forcedChunk -> forcedChunk.worldSeed() == world.getSeed());
+    }
+
+    private static boolean hasForcedMinorDespawnChunksForWorld(ServerWorld world) {
+        return FORCED_MINOR_DESPAWN_CHUNKS.stream()
+                .anyMatch(forcedChunk -> forcedChunk.worldSeed() == world.getSeed());
+    }
+
+    private static boolean isMinorPoiDespawnScanDue(ServerWorld world) {
+        BreachedConfig.MinorPoiSettings minorPoiConfig = BreachedConfig.get().minorPoi;
+        return minorPoiConfig.lifecycleEnabled
+                && world.getTime() % minorPoiConfig.despawnScanIntervalTicks == 0;
+    }
+
+    private static boolean isMinorPoiPlayerScanDue(ServerWorld world) {
+        BreachedConfig.MinorPoiSettings minorPoiConfig = BreachedConfig.get().minorPoi;
+        return !world.getPlayers().isEmpty()
+                && world.getTime() % minorPoiConfig.playerScanIntervalTicks == 0;
+    }
+
+    private static boolean isMajorRestockScanDue(ServerWorld world) {
+        BreachedConfig.MajorStructureLootSettings lootConfig = BreachedConfig.get().majorStructureLoot;
+        return lootConfig.enabled
+                && world.getTime() % lootConfig.scanIntervalTicks == 0;
     }
 
     private static MinorPoiAttemptResult tryPlaceMinorPoisInChunk(
