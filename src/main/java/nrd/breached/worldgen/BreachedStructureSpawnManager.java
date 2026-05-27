@@ -6,6 +6,7 @@ import net.minecraft.block.Block;
 import net.minecraft.inventory.LootableInventory;
 import net.minecraft.loot.LootTable;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtHelper;
 import net.minecraft.nbt.NbtList;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
@@ -315,6 +316,71 @@ public final class BreachedStructureSpawnManager {
         };
     }
 
+    public static List<TemplatePlacedBlock> getTemplatePlacedBlocks(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BlockPos pos,
+            BlockMirror mirror,
+            BlockRotation rotation
+    ) {
+        return getTemplateBlocks(world, definition, template, pos, mirror, rotation, false);
+    }
+
+    public static List<TemplatePlacedBlock> getTemplateFootprintBlocks(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BlockPos pos,
+            BlockMirror mirror,
+            BlockRotation rotation
+    ) {
+        return getTemplateBlocks(world, definition, template, pos, mirror, rotation, true);
+    }
+
+    private static List<TemplatePlacedBlock> getTemplateBlocks(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BlockPos pos,
+            BlockMirror mirror,
+            BlockRotation rotation,
+            boolean includeAir
+    ) {
+        StructurePlacementData placementData = createPlacementData(definition, mirror, rotation);
+        NbtCompound templateNbt = template.writeNbt(new NbtCompound());
+        List<BlockState> palette = getPrimaryPaletteBlockStates(world, templateNbt);
+        Set<Integer> jigsawStateIds = getJigsawStateIds(templateNbt);
+        List<TemplatePlacedBlock> placedBlocks = new ArrayList<>();
+
+        NbtList blocks = templateNbt.getListOrEmpty("blocks");
+        for (int index = 0; index < blocks.size(); index++) {
+            NbtCompound blockNbt = blocks.getCompoundOrEmpty(index);
+            int stateIndex = blockNbt.getInt("state", -1);
+            if (stateIndex < 0 || stateIndex >= palette.size()) {
+                continue;
+            }
+
+            BlockState state = jigsawStateIds.contains(stateIndex)
+                    ? Blocks.AIR.getDefaultState()
+                    : normalizePlacedTemplateState(palette.get(stateIndex), mirror, rotation);
+            if (!includeAir && state.isAir()) {
+                continue;
+            }
+
+            NbtList blockPos = blockNbt.getListOrEmpty("pos");
+            BlockPos relativePos = new BlockPos(
+                    blockPos.getInt(0, 0),
+                    blockPos.getInt(1, 0),
+                    blockPos.getInt(2, 0)
+            );
+            BlockPos worldPos = StructureTemplate.transform(placementData, relativePos).add(pos);
+            placedBlocks.add(new TemplatePlacedBlock(worldPos, state));
+        }
+
+        return placedBlocks;
+    }
+
     public static int getSurfaceY(ServerWorld world, int x, int z) {
         world.getChunk(Math.floorDiv(x, 16), Math.floorDiv(z, 16));
         return world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
@@ -465,6 +531,28 @@ public final class BreachedStructureSpawnManager {
         return palette;
     }
 
+    private static List<BlockState> getPrimaryPaletteBlockStates(ServerWorld world, NbtCompound templateNbt) {
+        NbtList palette = getPrimaryPalette(templateNbt);
+        List<BlockState> states = new ArrayList<>();
+        for (int index = 0; index < palette.size(); index++) {
+            states.add(NbtHelper.toBlockState(
+                    world.getRegistryManager().getOrThrow(RegistryKeys.BLOCK),
+                    palette.getCompoundOrEmpty(index)
+            ));
+        }
+
+        return states;
+    }
+
+    private static BlockState normalizePlacedTemplateState(BlockState state, BlockMirror mirror, BlockRotation rotation) {
+        state = state.mirror(mirror).rotate(rotation);
+        if (state.contains(Properties.WATERLOGGED) && state.get(Properties.WATERLOGGED)) {
+            return state.with(Properties.WATERLOGGED, false);
+        }
+
+        return state;
+    }
+
     private static void applyTemplateLootTables(
             ServerWorld world,
             StructureTemplate template,
@@ -535,6 +623,9 @@ public final class BreachedStructureSpawnManager {
     }
 
     public record RadiusCandidate(int index, int x, int z, int radius, double angle) {
+    }
+
+    public record TemplatePlacedBlock(BlockPos pos, BlockState state) {
     }
 
     public record TemplateLootContainer(BlockPos pos, Identifier lootTableId, long lootTableSeed) {

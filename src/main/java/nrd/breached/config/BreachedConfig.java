@@ -166,6 +166,13 @@ public final class BreachedConfig {
         public int hardMinimumSpacing = 64;
         public int preferredSpacing = 96;
         public int minimumSpacing = 64;
+        public boolean lifecycleEnabled = true;
+        public int minDespawnIntervalTicks = 108000;
+        public int maxDespawnIntervalTicks = 216000;
+        public int despawnScanIntervalTicks = 1200;
+        public int despawnChecksPerScan = 4;
+        public int despawnRetryIntervalTicks = 1200;
+        public int intactBlockRetirePercent = 30;
 
         private void normalize() {
             smallWorldBudget = clamp(smallWorldBudget, 0, 4096);
@@ -180,6 +187,12 @@ public final class BreachedConfig {
             hardMinimumSpacing = clamp(hardMinimumSpacing, 0, 2048);
             minimumSpacing = clamp(Math.max(minimumSpacing, hardMinimumSpacing), 0, 2048);
             preferredSpacing = clamp(Math.max(preferredSpacing, minimumSpacing), 0, 4096);
+            minDespawnIntervalTicks = clamp(minDespawnIntervalTicks, 20, 1728000);
+            maxDespawnIntervalTicks = clamp(Math.max(maxDespawnIntervalTicks, minDespawnIntervalTicks), 20, 1728000);
+            despawnScanIntervalTicks = clamp(despawnScanIntervalTicks, 20, 72000);
+            despawnChecksPerScan = clamp(despawnChecksPerScan, 1, 128);
+            despawnRetryIntervalTicks = clamp(despawnRetryIntervalTicks, 20, 1728000);
+            intactBlockRetirePercent = clamp(intactBlockRetirePercent, 0, 100);
         }
     }
 

@@ -5,37 +5,40 @@ import net.minecraft.block.Blocks;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public final class BreachedStructureSupportGenerator {
     private static final int BLOCK_UPDATE_FLAGS = 2;
 
     private BreachedStructureSupportGenerator() {
     }
 
-    public static void generate(
+    public static List<BlockPos> generate(
             ServerWorld world,
             BreachedStructureDefinition definition,
             BreachedStructurePlacement placement
     ) {
-        switch (definition.supportMode()) {
-            case NONE -> {
-            }
+        return switch (definition.supportMode()) {
+            case NONE -> List.of();
             case WATER_SOLID_FOOTPRINT -> generateWaterSolidFootprint(world, definition, placement);
             case WATER_MARKER_PILLARS -> generateWaterMarkerPillars(world, definition, placement);
-        }
+        };
     }
 
-    private static void generateWaterSolidFootprint(
+    private static List<BlockPos> generateWaterSolidFootprint(
             ServerWorld world,
             BreachedStructureDefinition definition,
             BreachedStructurePlacement placement
     ) {
         if (definition.supportBlock().equals(Blocks.AIR) || definition.supportMaxDepth() <= 0) {
-            return;
+            return List.of();
         }
 
         BlockState supportState = definition.supportBlock().getDefaultState();
         BlockPos origin = placement.origin();
         int minY = Math.max(world.getBottomY(), origin.getY() - definition.supportMaxDepth());
+        List<BlockPos> placedPositions = new ArrayList<>();
         int placedBlocks = 0;
 
         for (int x = origin.getX(); x < origin.getX() + placement.size().getX(); x++) {
@@ -48,6 +51,7 @@ public final class BreachedStructureSupportGenerator {
                     }
 
                     world.setBlockState(pos, supportState, BLOCK_UPDATE_FLAGS);
+                    placedPositions.add(pos.toImmutable());
                     placedBlocks++;
                 }
             }
@@ -57,9 +61,10 @@ public final class BreachedStructureSupportGenerator {
                 + " using " + definition.supportBlock()
                 + " down to max depth " + definition.supportMaxDepth()
                 + "; placed " + placedBlocks + " blocks.");
+        return placedPositions;
     }
 
-    private static void generateWaterMarkerPillars(
+    private static List<BlockPos> generateWaterMarkerPillars(
             ServerWorld world,
             BreachedStructureDefinition definition,
             BreachedStructurePlacement placement
@@ -67,11 +72,12 @@ public final class BreachedStructureSupportGenerator {
         if (definition.supportBlock().equals(Blocks.AIR)
                 || definition.supportMarkerBlock().equals(Blocks.AIR)
                 || definition.supportMaxDepth() <= 0) {
-            return;
+            return List.of();
         }
 
         BlockState supportState = definition.supportBlock().getDefaultState();
         BlockPos origin = placement.origin();
+        List<BlockPos> placedPositions = new ArrayList<>();
         int markerCount = 0;
         int placedBlocks = 0;
 
@@ -85,8 +91,9 @@ public final class BreachedStructureSupportGenerator {
 
                     markerCount++;
                     world.setBlockState(markerPos, supportState, BLOCK_UPDATE_FLAGS);
+                    placedPositions.add(markerPos.toImmutable());
                     placedBlocks++;
-                    placedBlocks += generatePillarBelow(world, markerPos.down(), supportState, definition.supportMaxDepth());
+                    placedBlocks += generatePillarBelow(world, markerPos.down(), supportState, definition.supportMaxDepth(), placedPositions);
                 }
             }
         }
@@ -96,13 +103,15 @@ public final class BreachedStructureSupportGenerator {
                 + " and support " + definition.supportBlock()
                 + "; found " + markerCount
                 + " markers and placed " + placedBlocks + " blocks.");
+        return placedPositions;
     }
 
     private static int generatePillarBelow(
             ServerWorld world,
             BlockPos startPos,
             BlockState supportState,
-            int maxDepth
+            int maxDepth,
+            List<BlockPos> placedPositions
     ) {
         int minY = Math.max(world.getBottomY(), startPos.getY() - maxDepth + 1);
         int placedBlocks = 0;
@@ -115,6 +124,7 @@ public final class BreachedStructureSupportGenerator {
             }
 
             world.setBlockState(pos, supportState, BLOCK_UPDATE_FLAGS);
+            placedPositions.add(pos.toImmutable());
             placedBlocks++;
         }
 

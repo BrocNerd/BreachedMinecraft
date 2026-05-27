@@ -4,6 +4,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.minecraft.block.Block;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.LeavesBlock;
@@ -14,6 +15,7 @@ import net.minecraft.inventory.Inventory;
 import net.minecraft.inventory.LootableInventory;
 import net.minecraft.item.BlockItem;
 import net.minecraft.loot.LootTable;
+import net.minecraft.nbt.NbtHelper;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.item.ItemPlacementContext;
@@ -21,6 +23,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.structure.StructureTemplate;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Vec3i;
@@ -28,10 +31,12 @@ import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
 import nrd.breached.config.BreachedConfig;
+import nrd.breached.landlock.LandlockClaimManager;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -43,10 +48,14 @@ public final class BreachedStructurePlacementManager {
     private static final int REQUIRED_CHUNK_LOADS_PER_TICK = 1;
     private static final int MAX_FORCED_CHUNK_TICKS = 200;
     private static final int MAX_FORCED_RESTOCK_CHUNK_TICKS = 200;
+    private static final int MAX_FORCED_MINOR_DESPAWN_CHUNK_TICKS = 200;
+    private static final int REMOVE_BLOCK_WITHOUT_DROPS_FLAGS = Block.NOTIFY_LISTENERS | Block.SKIP_DROPS;
+    private static final int MINOR_POI_PLAYER_REPLACED_BLOCK_PERCENT = 25;
     private static final int MINOR_POI_CHUNK_INSET = 2;
     private static final Set<PendingStructurePlacement> PENDING_PLACEMENTS = new HashSet<>();
     private static final Set<ForcedStructureChunk> FORCED_CHUNKS = new HashSet<>();
     private static final Set<ForcedRestockChunk> FORCED_RESTOCK_CHUNKS = new HashSet<>();
+    private static final Set<ForcedMinorDespawnChunk> FORCED_MINOR_DESPAWN_CHUNKS = new HashSet<>();
     private static final Set<PendingMinorPoiChunk> PENDING_MINOR_POI_CHUNKS = new HashSet<>();
 
     private BreachedStructurePlacementManager() {
@@ -102,6 +111,8 @@ public final class BreachedStructurePlacementManager {
         reservePlannedStructures(world, state);
         forceLoadRequiredReservedChunks(world, state);
         releaseCompletedForcedChunks(world, state);
+        despawnAndRetireMinorPois(world, state);
+        releaseExpiredForcedMinorDespawnChunks(world, state);
         tryPlacePendingMinorPoiChunks(world, state);
         tryPlaceMinorPoisNearPlayers(world, state);
         restockMajorStructureLoot(world, state);
@@ -347,20 +358,36 @@ public final class BreachedStructurePlacementManager {
             return skippedUnloadedFootprint ? MinorPoiAttemptResult.NOT_READY : MinorPoiAttemptResult.FAILED;
         }
 
+        int originY = getPlacementOriginY(bestChoice.definition(), bestChoice.site());
+        BlockPos origin = new BlockPos(bestChoice.originX(), originY, bestChoice.originZ());
+        List<BreachedStructurePlacementState.SavedBlockSnapshot> restoreBlocks = captureOriginalMinorPoiBlocks(
+                world,
+                bestChoice.definition(),
+                bestChoice.template(),
+                origin,
+                BreachedStructureSpawnManager.getRotatedSize(bestChoice.template().getSize(), bestChoice.definition().rotation())
+        );
         BreachedStructurePlacement placement = BreachedStructureSpawnManager.place(
                 world,
                 bestChoice.definition(),
                 bestChoice.template(),
                 bestChoice.originX(),
-                getPlacementOriginY(bestChoice.definition(), bestChoice.site()),
+                originY,
                 bestChoice.originZ(),
                 bestChoice.definition().mirror(),
                 bestChoice.definition().rotation(),
                 bestChoice.site()
         );
-        BreachedStructureSupportGenerator.generate(world, bestChoice.definition(), placement);
+        List<BlockPos> cleanupBlocks = BreachedStructureSupportGenerator.generate(world, bestChoice.definition(), placement);
         clearNaturalBlocksAboveStructure(world, bestChoice.definition(), placement);
-        state.markPlaced(bestChoice.placementKey(), placement, world.getTime());
+        state.markPlacedMinor(
+                bestChoice.placementKey(),
+                placement,
+                world.getTime(),
+                createNextMinorPoiDespawnTime(world, bestChoice.placementKey()),
+                cleanupBlocks,
+                restoreBlocks
+        );
         System.out.println("[Breached] Placed minor POI " + bestChoice.definition().logName()
                 + " from chunk " + chunkPos.x + ", " + chunkPos.z
                 + " at x " + placement.origin().getX()
@@ -458,6 +485,98 @@ public final class BreachedStructurePlacementManager {
         return Integer.compare(left.candidate().index(), right.candidate().index());
     }
 
+    private static List<BreachedStructurePlacementState.SavedBlockSnapshot> captureOriginalMinorPoiBlocks(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BlockPos origin,
+            Vec3i footprintSize
+    ) {
+        Map<BlockPos, BreachedStructurePlacementState.SavedBlockSnapshot> snapshots = new LinkedHashMap<>();
+        for (BreachedStructureSpawnManager.TemplatePlacedBlock expectedBlock : BreachedStructureSpawnManager.getTemplatePlacedBlocks(
+                world,
+                definition,
+                template,
+                origin,
+                definition.mirror(),
+                definition.rotation()
+        )) {
+            captureOriginalBlockSnapshot(world, expectedBlock.pos(), snapshots);
+        }
+
+        captureOriginalSupportBlocks(world, definition, origin, footprintSize, snapshots);
+        captureOriginalClearanceBlocks(world, definition, origin, footprintSize, snapshots);
+        return List.copyOf(snapshots.values());
+    }
+
+    private static void captureOriginalSupportBlocks(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BlockPos origin,
+            Vec3i footprintSize,
+            Map<BlockPos, BreachedStructurePlacementState.SavedBlockSnapshot> snapshots
+    ) {
+        if (definition.supportMode() == BreachedStructureDefinition.SupportMode.NONE || definition.supportMaxDepth() <= 0) {
+            return;
+        }
+
+        int minY = Math.max(world.getBottomY(), origin.getY() - definition.supportMaxDepth());
+        for (int x = origin.getX(); x < origin.getX() + footprintSize.getX(); x++) {
+            for (int z = origin.getZ(); z < origin.getZ() + footprintSize.getZ(); z++) {
+                for (int y = origin.getY() - 1; y >= minY; y--) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    if (!state.isOf(Blocks.WATER) && !state.isAir()) {
+                        break;
+                    }
+
+                    captureOriginalBlockSnapshot(world, pos, snapshots);
+                }
+            }
+        }
+    }
+
+    private static void captureOriginalClearanceBlocks(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BlockPos origin,
+            Vec3i footprintSize,
+            Map<BlockPos, BreachedStructurePlacementState.SavedBlockSnapshot> snapshots
+    ) {
+        if (!definition.canClearBlocks()) {
+            return;
+        }
+
+        int maxY = Math.min(world.getTopYInclusive(), origin.getY() + footprintSize.getY() + 5);
+        for (int x = origin.getX(); x < origin.getX() + footprintSize.getX(); x++) {
+            for (int z = origin.getZ(); z < origin.getZ() + footprintSize.getZ(); z++) {
+                for (int y = origin.getY(); y <= maxY; y++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    if (isNaturalSurfaceObstruction(world.getBlockState(pos))) {
+                        captureOriginalBlockSnapshot(world, pos, snapshots);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void captureOriginalBlockSnapshot(
+            ServerWorld world,
+            BlockPos pos,
+            Map<BlockPos, BreachedStructurePlacementState.SavedBlockSnapshot> snapshots
+    ) {
+        BlockState state = world.getBlockState(pos);
+        if (state.isAir() || world.getBlockEntity(pos) != null) {
+            return;
+        }
+
+        BlockPos immutablePos = pos.toImmutable();
+        snapshots.putIfAbsent(
+                immutablePos,
+                new BreachedStructurePlacementState.SavedBlockSnapshot(immutablePos, NbtHelper.fromBlockState(state))
+        );
+    }
+
     private static void clearNaturalBlocksAboveStructure(
             ServerWorld world,
             BreachedStructureDefinition definition,
@@ -494,7 +613,7 @@ public final class BreachedStructurePlacementManager {
                         continue;
                     }
 
-                    world.setBlockState(pos, Blocks.AIR.getDefaultState(), 2);
+                    removeBlockWithoutDrops(world, pos);
                     clearedBlocks++;
                 }
             }
@@ -504,6 +623,443 @@ public final class BreachedStructurePlacementManager {
             System.out.println("[Breached] Cleared " + clearedBlocks
                     + " natural surface obstruction blocks above placed blocks in " + placement.logName() + ".");
         }
+    }
+
+    private static void despawnAndRetireMinorPois(ServerWorld world, BreachedStructurePlacementState state) {
+        BreachedConfig.MinorPoiSettings minorPoiConfig = BreachedConfig.get().minorPoi;
+        if (!minorPoiConfig.lifecycleEnabled
+                || world.getTime() % minorPoiConfig.despawnScanIntervalTicks != 0) {
+            return;
+        }
+
+        int dueDespawnChecks = 0;
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> entry : new ArrayList<>(state.placements())) {
+            BreachedStructurePlacementState.SavedPlacement placement = entry.getValue();
+            if (!placement.active()) {
+                continue;
+            }
+
+            Optional<BreachedStructureDefinition> definition = getActiveDefinition(world, structureKey(entry.getKey()));
+            if (definition.isEmpty()
+                    || definition.get().spacingGroup() != BreachedStructureDefinition.SpacingGroup.MINOR
+                    || !world.getRegistryKey().equals(definition.get().requiredDimension())) {
+                continue;
+            }
+
+            if (placement.nextMinorDespawnTime() <= placement.placedTime()) {
+                state.scheduleMinorDespawn(entry.getKey(), createNextMinorPoiDespawnTime(world, entry.getKey()));
+                continue;
+            }
+
+            long earliestConfiguredDespawnTime = placement.placedTime() + minorPoiConfig.minDespawnIntervalTicks;
+            if (placement.nextMinorDespawnTime() < earliestConfiguredDespawnTime) {
+                state.scheduleMinorDespawn(entry.getKey(), earliestConfiguredDespawnTime);
+                placement = state.getPlacement(entry.getKey()).orElse(placement);
+            }
+
+            long latestConfiguredDespawnTime = placement.placedTime() + minorPoiConfig.maxDespawnIntervalTicks;
+            if (placement.nextMinorDespawnTime() > latestConfiguredDespawnTime) {
+                long rescheduledTime = Math.max(world.getTime(), latestConfiguredDespawnTime);
+                state.scheduleMinorDespawn(entry.getKey(), rescheduledTime);
+                placement = state.getPlacement(entry.getKey()).orElse(placement);
+            }
+
+            boolean dueForDespawn = world.getTime() >= placement.nextMinorDespawnTime();
+            if (dueForDespawn) {
+                if (dueDespawnChecks >= minorPoiConfig.despawnChecksPerScan) {
+                    continue;
+                }
+
+                dueDespawnChecks++;
+            }
+            tryDespawnAndRetireMinorPoi(world, state, entry.getKey(), definition.get(), placement, dueForDespawn);
+        }
+    }
+
+    private static void tryDespawnAndRetireMinorPoi(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            String placementKey,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            boolean dueForDespawn
+    ) {
+        Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, definition);
+        if (template.isEmpty()) {
+            if (dueForDespawn) {
+                state.scheduleMinorDespawn(placementKey, createMinorPoiDespawnRetryTime(world));
+            }
+            return;
+        }
+
+        Vec3i footprintSize = BreachedStructureSpawnManager.getRotatedSize(template.get().getSize(), definition.rotation());
+        if (placement.sizeX() != footprintSize.getX()
+                || placement.sizeY() != footprintSize.getY()
+                || placement.sizeZ() != footprintSize.getZ()) {
+            state.setMinorFootprintSize(placementKey, footprintSize.getX(), footprintSize.getY(), footprintSize.getZ());
+        }
+
+        if (!isFootprintLoaded(world, placement.originX(), placement.originZ(), footprintSize)) {
+            if (dueForDespawn) {
+                forceLoadMissingMinorDespawnFootprintChunks(world, placementKey, placement.originX(), placement.originZ(), footprintSize);
+            }
+            return;
+        }
+
+        List<BreachedStructureSpawnManager.TemplatePlacedBlock> expectedBlocks = BreachedStructureSpawnManager.getTemplatePlacedBlocks(
+                world,
+                definition,
+                template.get(),
+                new BlockPos(placement.originX(), placement.originY(), placement.originZ()),
+                definition.mirror(),
+                definition.rotation()
+        );
+        List<BreachedStructureSpawnManager.TemplatePlacedBlock> footprintBlocks = BreachedStructureSpawnManager.getTemplateFootprintBlocks(
+                world,
+                definition,
+                template.get(),
+                new BlockPos(placement.originX(), placement.originY(), placement.originZ()),
+                definition.mirror(),
+                definition.rotation()
+        );
+        MinorPoiBlockEvaluation blockEvaluation = evaluateMinorPoiBlocks(world, expectedBlocks, footprintBlocks);
+        boolean footprintClaimed = isMinorPoiFootprintClaimed(world, placement, footprintSize);
+        Optional<String> playerTouchReason = getMinorPoiPlayerTouchReason(placement, blockEvaluation, footprintClaimed);
+        if (playerTouchReason.isPresent()) {
+            retirePlayerTouchedMinorPoi(world, state, placementKey, placement, blockEvaluation, playerTouchReason.get());
+            return;
+        }
+
+        if (!dueForDespawn) {
+            return;
+        }
+
+        int removedBlocks = 0;
+        removedBlocks = removeMatchingMinorPoiBlocks(world, expectedBlocks);
+        removedBlocks += removeMatchingCleanupBlocks(world, definition, placement.cleanupBlocks());
+        int restoredBlocks = restoreOriginalMinorPoiBlocks(world, placement.restoreBlocks());
+
+        state.retirePlacement(placementKey, world.getTime());
+        releaseForcedMinorDespawnChunks(world, placementKey);
+        System.out.println("[Breached] Retired minor POI " + placementKey
+                + " at x " + placement.originX()
+                + ", z " + placement.originZ()
+                + " with " + blockEvaluation.intactPercent()
+                + "% of template blocks intact; removed " + removedBlocks
+                + " matching blocks and restored " + restoredBlocks
+                + " original blocks.");
+    }
+
+    private static MinorPoiBlockEvaluation evaluateMinorPoiBlocks(
+            ServerWorld world,
+            List<BreachedStructureSpawnManager.TemplatePlacedBlock> expectedBlocks,
+            List<BreachedStructureSpawnManager.TemplatePlacedBlock> footprintBlocks
+    ) {
+        int matchingBlocks = 0;
+        int replacedBlocks = 0;
+        boolean hasInventoryContents = false;
+        Set<BlockPos> expectedBlockPositions = new HashSet<>();
+
+        for (BreachedStructureSpawnManager.TemplatePlacedBlock expectedBlock : expectedBlocks) {
+            expectedBlockPositions.add(expectedBlock.pos());
+            BlockState actualState = world.getBlockState(expectedBlock.pos());
+            if (isMatchingMinorPoiBlock(actualState, expectedBlock.state())) {
+                matchingBlocks++;
+            } else if (isPlayerReplacementState(actualState)) {
+                replacedBlocks++;
+            }
+
+            if (hasPlayerInventoryContents(world.getBlockEntity(expectedBlock.pos()))) {
+                hasInventoryContents = true;
+            }
+        }
+
+        for (BreachedStructureSpawnManager.TemplatePlacedBlock footprintBlock : footprintBlocks) {
+            if (!footprintBlock.state().isAir() || expectedBlockPositions.contains(footprintBlock.pos())) {
+                continue;
+            }
+
+            if (hasPlayerInventoryContents(world.getBlockEntity(footprintBlock.pos()))) {
+                hasInventoryContents = true;
+            }
+        }
+
+        return new MinorPoiBlockEvaluation(expectedBlocks.size(), matchingBlocks, replacedBlocks, hasInventoryContents);
+    }
+
+    private static Optional<String> getMinorPoiPlayerTouchReason(
+            BreachedStructurePlacementState.SavedPlacement placement,
+            MinorPoiBlockEvaluation blockEvaluation,
+            boolean footprintClaimed
+    ) {
+        if (placement.playerTouched()) {
+            return Optional.of("already marked player-touched");
+        }
+
+        if (footprintClaimed) {
+            return Optional.of("a landlock claim overlaps the footprint");
+        }
+
+        if (blockEvaluation.replacedBlockPercentAtLeast(MINOR_POI_PLAYER_REPLACED_BLOCK_PERCENT)) {
+            return Optional.of(blockEvaluation.replacedBlockPercent() + "% of structure blocks were replaced");
+        }
+
+        return Optional.empty();
+    }
+
+    private static void retirePlayerTouchedMinorPoi(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            String placementKey,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            MinorPoiBlockEvaluation blockEvaluation,
+            String reason
+    ) {
+        state.markPlayerTouched(placementKey);
+        state.retirePlacement(placementKey, world.getTime());
+        releaseForcedMinorDespawnChunks(world, placementKey);
+        System.out.println("[Breached] Retired player-touched minor POI " + placementKey
+                + " at x " + placement.originX()
+                + ", z " + placement.originZ()
+                + "; reason: " + reason
+                + "; intact " + blockEvaluation.intactPercent()
+                + "%, replaced " + blockEvaluation.replacedBlockPercent()
+                + "%; no blocks removed.");
+    }
+
+    private static int removeMatchingMinorPoiBlocks(
+            ServerWorld world,
+            List<BreachedStructureSpawnManager.TemplatePlacedBlock> expectedBlocks
+    ) {
+        int removedBlocks = 0;
+        for (BreachedStructureSpawnManager.TemplatePlacedBlock expectedBlock : expectedBlocks) {
+            if (!isMatchingMinorPoiBlock(world.getBlockState(expectedBlock.pos()), expectedBlock.state())) {
+                continue;
+            }
+
+            if (hasPlayerInventoryContents(world.getBlockEntity(expectedBlock.pos()))) {
+                continue;
+            }
+
+            removeBlockWithoutDrops(world, expectedBlock.pos());
+            removedBlocks++;
+        }
+
+        return removedBlocks;
+    }
+
+    private static boolean isMatchingMinorPoiBlock(BlockState actualState, BlockState expectedState) {
+        return actualState.isOf(expectedState.getBlock());
+    }
+
+    private static boolean isPlayerReplacementState(BlockState state) {
+        return !state.isAir()
+                && !state.isOf(Blocks.WATER)
+                && !state.isOf(Blocks.LAVA);
+    }
+
+    private static void removeBlockWithoutDrops(ServerWorld world, BlockPos pos) {
+        world.setBlockState(pos, Blocks.AIR.getDefaultState(), REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
+    }
+
+    private static int removeMatchingCleanupBlocks(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            List<BlockPos> cleanupBlocks
+    ) {
+        if (cleanupBlocks.isEmpty() || definition.supportBlock().equals(Blocks.AIR)) {
+            return 0;
+        }
+
+        int removedBlocks = 0;
+        BlockState cleanupState = definition.supportBlock().getDefaultState();
+        for (BlockPos cleanupBlock : cleanupBlocks) {
+            if (!world.getBlockState(cleanupBlock).equals(cleanupState)) {
+                continue;
+            }
+
+            removeBlockWithoutDrops(world, cleanupBlock);
+            removedBlocks++;
+        }
+
+        return removedBlocks;
+    }
+
+    private static int restoreOriginalMinorPoiBlocks(
+            ServerWorld world,
+            List<BreachedStructurePlacementState.SavedBlockSnapshot> restoreBlocks
+    ) {
+        int restoredBlocks = 0;
+        for (BreachedStructurePlacementState.SavedBlockSnapshot restoreBlock : restoreBlocks) {
+            BlockPos pos = restoreBlock.pos();
+            if (!world.getBlockState(pos).isAir() || world.getBlockEntity(pos) != null) {
+                continue;
+            }
+
+            BlockState originalState = NbtHelper.toBlockState(
+                    world.getRegistryManager().getOrThrow(RegistryKeys.BLOCK),
+                    restoreBlock.stateNbt()
+            );
+            if (originalState.isAir()) {
+                continue;
+            }
+
+            world.setBlockState(pos, originalState, REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
+            restoredBlocks++;
+        }
+
+        return restoredBlocks;
+    }
+
+    private static boolean hasPlayerInventoryContents(BlockEntity blockEntity) {
+        if (!(blockEntity instanceof Inventory inventory)) {
+            return false;
+        }
+
+        if (blockEntity instanceof LootableInventory lootableInventory && lootableInventory.getLootTable() != null) {
+            return false;
+        }
+
+        return !isInventoryEmpty(inventory);
+    }
+
+    private static boolean isInventoryEmpty(Inventory inventory) {
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            if (!inventory.getStack(slot).isEmpty()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean isMinorPoiFootprintClaimed(
+            ServerWorld world,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            Vec3i footprintSize
+    ) {
+        for (int x = placement.originX(); x < placement.originX() + footprintSize.getX(); x++) {
+            for (int z = placement.originZ(); z < placement.originZ() + footprintSize.getZ(); z++) {
+                if (LandlockClaimManager.isInsideAnyClaim(world, new BlockPos(x, placement.originY(), z))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static void forceLoadMissingMinorDespawnFootprintChunks(
+            ServerWorld world,
+            String placementKey,
+            int originX,
+            int originZ,
+            Vec3i footprintSize
+    ) {
+        int minChunkX = Math.floorDiv(originX, CHUNK_SIZE);
+        int minChunkZ = Math.floorDiv(originZ, CHUNK_SIZE);
+        int maxChunkX = Math.floorDiv(originX + footprintSize.getX() - 1, CHUNK_SIZE);
+        int maxChunkZ = Math.floorDiv(originZ + footprintSize.getZ() - 1, CHUNK_SIZE);
+
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                forceLoadMinorDespawnChunk(world, placementKey, new ChunkPos(chunkX, chunkZ));
+            }
+        }
+    }
+
+    private static void forceLoadMinorDespawnChunk(ServerWorld world, String placementKey, ChunkPos chunkPos) {
+        if (world.isChunkLoaded(chunkPos.x, chunkPos.z)) {
+            return;
+        }
+
+        if (!isMinorDespawnChunkForceLoaded(world.getSeed(), placementKey, chunkPos.x, chunkPos.z)) {
+            FORCED_MINOR_DESPAWN_CHUNKS.add(new ForcedMinorDespawnChunk(world.getSeed(), placementKey, chunkPos.x, chunkPos.z));
+            world.setChunkForced(chunkPos.x, chunkPos.z, true);
+            System.out.println("[Breached] Force-loading minor POI despawn chunk "
+                    + chunkPos.x + ", " + chunkPos.z
+                    + " for " + placementKey + ".");
+        }
+
+        world.getChunk(chunkPos.x, chunkPos.z);
+    }
+
+    private static boolean isMinorDespawnChunkForceLoaded(long worldSeed, String placementKey, int chunkX, int chunkZ) {
+        return FORCED_MINOR_DESPAWN_CHUNKS.stream()
+                .anyMatch(forcedChunk -> forcedChunk.worldSeed() == worldSeed
+                        && forcedChunk.placementKey().equals(placementKey)
+                        && forcedChunk.chunkX() == chunkX
+                        && forcedChunk.chunkZ() == chunkZ);
+    }
+
+    private static void releaseForcedMinorDespawnChunks(ServerWorld world, String placementKey) {
+        Set<ForcedMinorDespawnChunk> updatedForcedChunks = new HashSet<>();
+        for (ForcedMinorDespawnChunk forcedChunk : FORCED_MINOR_DESPAWN_CHUNKS) {
+            if (forcedChunk.worldSeed() != world.getSeed() || !forcedChunk.placementKey().equals(placementKey)) {
+                updatedForcedChunks.add(forcedChunk);
+                continue;
+            }
+
+            world.setChunkForced(forcedChunk.chunkX(), forcedChunk.chunkZ(), false);
+            System.out.println("[Breached] Released force-loaded minor POI despawn chunk "
+                    + forcedChunk.chunkX() + ", " + forcedChunk.chunkZ()
+                    + " for " + forcedChunk.placementKey() + ".");
+        }
+
+        FORCED_MINOR_DESPAWN_CHUNKS.clear();
+        FORCED_MINOR_DESPAWN_CHUNKS.addAll(updatedForcedChunks);
+    }
+
+    private static void releaseExpiredForcedMinorDespawnChunks(
+            ServerWorld world,
+            BreachedStructurePlacementState state
+    ) {
+        Set<ForcedMinorDespawnChunk> updatedForcedChunks = new HashSet<>();
+        for (ForcedMinorDespawnChunk forcedChunk : FORCED_MINOR_DESPAWN_CHUNKS) {
+            if (forcedChunk.worldSeed() != world.getSeed()) {
+                updatedForcedChunks.add(forcedChunk);
+                continue;
+            }
+
+            boolean completed = state.getPlacement(forcedChunk.placementKey())
+                    .map(placement -> !placement.active())
+                    .orElse(true);
+            boolean expired = forcedChunk.ticksLoaded() >= MAX_FORCED_MINOR_DESPAWN_CHUNK_TICKS;
+            if (completed || expired) {
+                world.setChunkForced(forcedChunk.chunkX(), forcedChunk.chunkZ(), false);
+                System.out.println("[Breached] Released "
+                        + (completed ? "completed" : "expired")
+                        + " force-loaded minor POI despawn chunk "
+                        + forcedChunk.chunkX() + ", " + forcedChunk.chunkZ()
+                        + " for " + forcedChunk.placementKey() + ".");
+                continue;
+            }
+
+            updatedForcedChunks.add(forcedChunk.withAdditionalTick());
+        }
+
+        FORCED_MINOR_DESPAWN_CHUNKS.clear();
+        FORCED_MINOR_DESPAWN_CHUNKS.addAll(updatedForcedChunks);
+    }
+
+    private static long createNextMinorPoiDespawnTime(ServerWorld world, String placementKey) {
+        BreachedConfig.MinorPoiSettings minorPoiConfig = BreachedConfig.get().minorPoi;
+        int intervalRange = minorPoiConfig.maxDespawnIntervalTicks - minorPoiConfig.minDespawnIntervalTicks;
+        java.util.Random random = new java.util.Random(
+                world.getSeed()
+                        ^ (world.getTime() * 0xD6E8FEB86659FD93L)
+                        ^ ((long) placementKey.hashCode() * 0x94D049BB133111EBL)
+        );
+        int interval = minorPoiConfig.minDespawnIntervalTicks;
+        if (intervalRange > 0) {
+            interval += random.nextInt(intervalRange + 1);
+        }
+
+        return world.getTime() + interval;
+    }
+
+    private static long createMinorPoiDespawnRetryTime(ServerWorld world) {
+        return world.getTime() + BreachedConfig.get().minorPoi.despawnRetryIntervalTicks;
     }
 
     private static void forceLoadRequiredReservedChunks(ServerWorld world, BreachedStructurePlacementState state) {
@@ -977,12 +1533,33 @@ public final class BreachedStructurePlacementManager {
     private static int countPlacedStructures(BreachedStructurePlacementState state, String structureKey) {
         int placed = 0;
         for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
-            if (isPlacementForStructure(placement.getKey(), structureKey)) {
+            if (isPlacementForStructure(placement.getKey(), structureKey)
+                    && shouldCountPlacement(placement.getKey(), placement.getValue())) {
                 placed++;
             }
         }
 
         return placed;
+    }
+
+    private static boolean shouldCountPlacement(
+            String placementKey,
+            BreachedStructurePlacementState.SavedPlacement placement
+    ) {
+        return !isMinorPoiPlacement(placementKey) || placement.active();
+    }
+
+    private static boolean isActiveMinorPoiPlacement(
+            String placementKey,
+            BreachedStructurePlacementState.SavedPlacement placement
+    ) {
+        return isMinorPoiPlacement(placementKey) && placement.active();
+    }
+
+    private static boolean isMinorPoiPlacement(String placementKey) {
+        return getBaseDefinition(structureKey(placementKey))
+                .map(definition -> definition.spacingGroup() == BreachedStructureDefinition.SpacingGroup.MINOR)
+                .orElse(false);
     }
 
     private static void restockMajorStructureLoot(ServerWorld world, BreachedStructurePlacementState state) {
@@ -1050,7 +1627,7 @@ public final class BreachedStructurePlacementManager {
                 totalRestockedContainers += restockedContainers;
                 if (lootConfig.announceRestocks) {
                     world.getServer().getPlayerManager().broadcast(
-                            Text.literal(getMajorRestockAnnouncement(entry.getKey())),
+                            getMajorRestockAnnouncement(entry.getKey()),
                             false
                     );
                 }
@@ -1066,25 +1643,25 @@ public final class BreachedStructurePlacementManager {
         }
     }
 
-    private static String getMajorRestockAnnouncement(String placementKey) {
+    private static Text getMajorRestockAnnouncement(String placementKey) {
         String structureKey = structureKey(placementKey);
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.SWORD_STATUE))) {
-            return "The statue has been restocked";
+            return Text.literal("The statue has been restocked").formatted(Formatting.BLACK);
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.PINK_TREE))) {
-            return "The Tree has been restocked";
+            return Text.literal("The Tree has been restocked").formatted(Formatting.LIGHT_PURPLE);
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.BIG_BOAT))) {
-            return "The Ship has been restocked";
+            return Text.literal("The Ship has been restocked").formatted(Formatting.BLUE);
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.HORACE))) {
-            return "Horace has been restocked";
+            return Text.literal("Horace has been restocked").formatted(Formatting.RED);
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.OFFICIAL_NETHER_PORTAL))) {
-            return "A portal has been restocked";
+            return Text.literal("A portal has been restocked").formatted(Formatting.DARK_PURPLE);
         }
 
-        return "Major structure loot has been restocked";
+        return Text.literal("Major structure loot has been restocked");
     }
 
     private static boolean tryBackfillMajorLootContainers(
@@ -1343,8 +1920,7 @@ public final class BreachedStructurePlacementManager {
     private static int countPlacedMinorPois(BreachedStructurePlacementState state) {
         int placed = 0;
         for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
-            Optional<BreachedStructureDefinition> definition = getBaseDefinition(structureKey(placement.getKey()));
-            if (definition.isPresent() && definition.get().spacingGroup() == BreachedStructureDefinition.SpacingGroup.MINOR) {
+            if (isActiveMinorPoiPlacement(placement.getKey(), placement.getValue())) {
                 placed++;
             }
         }
@@ -1376,8 +1952,7 @@ public final class BreachedStructurePlacementManager {
                 continue;
             }
 
-            Optional<BreachedStructureDefinition> otherDefinition = getBaseDefinition(structureKey(placement.getKey()));
-            if (otherDefinition.isEmpty() || otherDefinition.get().spacingGroup() != BreachedStructureDefinition.SpacingGroup.MINOR) {
+            if (!isActiveMinorPoiPlacement(placement.getKey(), placement.getValue())) {
                 continue;
             }
 
@@ -1417,8 +1992,7 @@ public final class BreachedStructurePlacementManager {
         int placed = 0;
 
         for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
-            Optional<BreachedStructureDefinition> definition = getBaseDefinition(structureKey(placement.getKey()));
-            if (definition.isEmpty() || definition.get().spacingGroup() != BreachedStructureDefinition.SpacingGroup.MINOR) {
+            if (!isActiveMinorPoiPlacement(placement.getKey(), placement.getValue())) {
                 continue;
             }
 
@@ -1488,6 +2062,10 @@ public final class BreachedStructurePlacementManager {
         long minimumSpacingSquared = (long) minimumSpacing * minimumSpacing;
         for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
             if (placement.getKey().equals(placementKey)) {
+                continue;
+            }
+
+            if (!shouldCountPlacement(placement.getKey(), placement.getValue())) {
                 continue;
             }
 
@@ -1696,21 +2274,29 @@ public final class BreachedStructurePlacementManager {
 
     private static void registerProtectionEvents() {
         PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) -> {
-            if (!shouldProtect(world, player, pos)) {
-                return true;
+            if (shouldProtect(world, player, pos)) {
+                player.sendMessage(Text.literal("Protected Breached structures cannot be modified."), false);
+                return false;
             }
 
-            player.sendMessage(Text.literal("Protected Breached structures cannot be modified."), false);
-            return false;
+            return true;
         });
 
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
-            if (world.isClient() || canBypassProtection(player) || !(player.getStackInHand(hand).getItem() instanceof BlockItem)) {
+            if (world.isClient() || !(player.getStackInHand(hand).getItem() instanceof BlockItem)) {
                 return ActionResult.PASS;
             }
 
             ItemPlacementContext placementContext = new ItemPlacementContext(player, hand, player.getStackInHand(hand), hitResult);
-            if (!placementContext.canPlace() || !isInsideProtectedStructure(world, placementContext.getBlockPos())) {
+            if (!placementContext.canPlace()) {
+                return ActionResult.PASS;
+            }
+
+            if (canBypassProtection(player)) {
+                return ActionResult.PASS;
+            }
+
+            if (!isInsideProtectedStructure(world, placementContext.getBlockPos())) {
                 return ActionResult.PASS;
             }
 
@@ -1825,6 +2411,33 @@ public final class BreachedStructurePlacementManager {
         );
     }
 
+    private record MinorPoiBlockEvaluation(
+            int expectedBlocks,
+            int matchingBlocks,
+            int replacedBlocks,
+            boolean hasInventoryContents
+    ) {
+        private int intactPercent() {
+            if (expectedBlocks <= 0) {
+                return 0;
+            }
+
+            return (int) Math.round((matchingBlocks * 100.0D) / expectedBlocks);
+        }
+
+        private int replacedBlockPercent() {
+            if (expectedBlocks <= 0) {
+                return 0;
+            }
+
+            return (int) Math.round((replacedBlocks * 100.0D) / expectedBlocks);
+        }
+
+        private boolean replacedBlockPercentAtLeast(int percent) {
+            return expectedBlocks > 0 && (long) replacedBlocks * 100L >= (long) expectedBlocks * percent;
+        }
+    }
+
     private record PendingMinorPoiChunk(long worldSeed, int chunkX, int chunkZ) {
     }
 
@@ -1866,6 +2479,22 @@ public final class BreachedStructurePlacementManager {
 
         private ForcedRestockChunk withAdditionalTick() {
             return new ForcedRestockChunk(worldSeed, placementKey, chunkX, chunkZ, ticksLoaded + 1);
+        }
+    }
+
+    private record ForcedMinorDespawnChunk(
+            long worldSeed,
+            String placementKey,
+            int chunkX,
+            int chunkZ,
+            int ticksLoaded
+    ) {
+        private ForcedMinorDespawnChunk(long worldSeed, String placementKey, int chunkX, int chunkZ) {
+            this(worldSeed, placementKey, chunkX, chunkZ, 0);
+        }
+
+        private ForcedMinorDespawnChunk withAdditionalTick() {
+            return new ForcedMinorDespawnChunk(worldSeed, placementKey, chunkX, chunkZ, ticksLoaded + 1);
         }
     }
 

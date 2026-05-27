@@ -32,11 +32,20 @@ public class BreachedStructurePlacementState extends PersistentState {
     private static final String LOOT_CONTAINERS_SCANNED_KEY = "loot_containers_scanned";
     private static final String LAST_RESTOCK_TIME_KEY = "last_restock_time";
     private static final String NEXT_RESTOCK_TIME_KEY = "next_restock_time";
+    private static final String SIZE_X_KEY = "size_x";
+    private static final String SIZE_Y_KEY = "size_y";
+    private static final String SIZE_Z_KEY = "size_z";
+    private static final String RETIRED_KEY = "retired";
+    private static final String PLAYER_TOUCHED_KEY = "player_touched";
+    private static final String NEXT_MINOR_DESPAWN_TIME_KEY = "next_minor_despawn_time";
+    private static final String CLEANUP_BLOCKS_KEY = "cleanup_blocks";
+    private static final String RESTORE_BLOCKS_KEY = "restore_blocks";
     private static final String STRUCTURE_KEY = "structure_key";
     private static final String CANDIDATE_INDEX_KEY = "candidate_index";
     private static final String X_KEY = "x";
     private static final String Y_KEY = "y";
     private static final String Z_KEY = "z";
+    private static final String BLOCK_STATE_KEY = "block_state";
     private static final String LOOT_TABLE_KEY = "loot_table";
     private static final String LOOT_TABLE_SEED_KEY = "loot_table_seed";
     private static final Codec<BreachedStructurePlacementState> CODEC = NbtCompound.CODEC.xmap(
@@ -104,6 +113,37 @@ public class BreachedStructurePlacementState extends PersistentState {
         markPlaced(key, placement, placedTime, List.of(), false);
     }
 
+    public void markPlacedMinor(
+            String key,
+            BreachedStructurePlacement placement,
+            long placedTime,
+            long nextMinorDespawnTime,
+            List<BlockPos> cleanupBlocks,
+            List<SavedBlockSnapshot> restoreBlocks
+    ) {
+        placements.put(key, new SavedPlacement(
+                BreachedStructureSpawnManager.getProtectedCenterX(placement),
+                BreachedStructureSpawnManager.getProtectedCenterZ(placement),
+                placement.origin().getX(),
+                placement.origin().getY(),
+                placement.origin().getZ(),
+                placedTime,
+                List.of(),
+                false,
+                placedTime,
+                placedTime,
+                placement.size().getX(),
+                placement.size().getY(),
+                placement.size().getZ(),
+                false,
+                false,
+                nextMinorDespawnTime,
+                cleanupBlocks,
+                restoreBlocks
+        ));
+        markDirty();
+    }
+
     public void markPlaced(
             String key,
             BreachedStructurePlacement placement,
@@ -151,13 +191,21 @@ public class BreachedStructurePlacementState extends PersistentState {
                 lootContainers,
                 lootContainersScanned,
                 placedTime,
-                nextRestockTime
+                nextRestockTime,
+                placement.size().getX(),
+                placement.size().getY(),
+                placement.size().getZ(),
+                false,
+                false,
+                0L,
+                List.of(),
+                List.of()
         ));
         markDirty();
     }
 
     public void markPlaced(String key, int centerX, int centerZ) {
-        placements.put(key, new SavedPlacement(centerX, centerZ, centerX, 0, centerZ, 0L, List.of(), false, 0L, 0L));
+        placements.put(key, new SavedPlacement(centerX, centerZ, centerX, 0, centerZ, 0L, List.of(), false, 0L, 0L, 0, 0, 0, false, false, 0L, List.of(), List.of()));
         markDirty();
     }
 
@@ -186,7 +234,15 @@ public class BreachedStructurePlacementState extends PersistentState {
                 lootContainers,
                 true,
                 lastRestockTime,
-                nextRestockTime
+                nextRestockTime,
+                placement.sizeX(),
+                placement.sizeY(),
+                placement.sizeZ(),
+                placement.retired(),
+                placement.playerTouched(),
+                placement.nextMinorDespawnTime(),
+                placement.cleanupBlocks(),
+                placement.restoreBlocks()
         ));
         markDirty();
     }
@@ -211,7 +267,112 @@ public class BreachedStructurePlacementState extends PersistentState {
                 placement.lootContainers(),
                 placement.lootContainersScanned(),
                 lastRestockTime,
-                nextRestockTime
+                nextRestockTime,
+                placement.sizeX(),
+                placement.sizeY(),
+                placement.sizeZ(),
+                placement.retired(),
+                placement.playerTouched(),
+                placement.nextMinorDespawnTime(),
+                placement.cleanupBlocks(),
+                placement.restoreBlocks()
+        ));
+        markDirty();
+    }
+
+    public void setMinorFootprintSize(String key, int sizeX, int sizeY, int sizeZ) {
+        SavedPlacement placement = placements.get(key);
+        if (placement == null
+                || (placement.sizeX() == sizeX && placement.sizeY() == sizeY && placement.sizeZ() == sizeZ)) {
+            return;
+        }
+
+        placements.put(key, copyPlacement(
+                placement,
+                placement.lootContainers(),
+                placement.lootContainersScanned(),
+                placement.lastRestockTime(),
+                placement.nextRestockTime(),
+                Math.max(0, sizeX),
+                Math.max(0, sizeY),
+                Math.max(0, sizeZ),
+                placement.retired(),
+                placement.playerTouched(),
+                placement.nextMinorDespawnTime(),
+                placement.cleanupBlocks(),
+                placement.restoreBlocks()
+        ));
+        markDirty();
+    }
+
+    public void scheduleMinorDespawn(String key, long nextMinorDespawnTime) {
+        SavedPlacement placement = placements.get(key);
+        if (placement == null || placement.nextMinorDespawnTime() == nextMinorDespawnTime) {
+            return;
+        }
+
+        placements.put(key, copyPlacement(
+                placement,
+                placement.lootContainers(),
+                placement.lootContainersScanned(),
+                placement.lastRestockTime(),
+                placement.nextRestockTime(),
+                placement.sizeX(),
+                placement.sizeY(),
+                placement.sizeZ(),
+                placement.retired(),
+                placement.playerTouched(),
+                nextMinorDespawnTime,
+                placement.cleanupBlocks(),
+                placement.restoreBlocks()
+        ));
+        markDirty();
+    }
+
+    public void markPlayerTouched(String key) {
+        SavedPlacement placement = placements.get(key);
+        if (placement == null || placement.playerTouched()) {
+            return;
+        }
+
+        placements.put(key, copyPlacement(
+                placement,
+                placement.lootContainers(),
+                placement.lootContainersScanned(),
+                placement.lastRestockTime(),
+                placement.nextRestockTime(),
+                placement.sizeX(),
+                placement.sizeY(),
+                placement.sizeZ(),
+                placement.retired(),
+                true,
+                placement.nextMinorDespawnTime(),
+                placement.cleanupBlocks(),
+                placement.restoreBlocks()
+        ));
+        markDirty();
+    }
+
+    public void retirePlacement(String key, long retiredTime) {
+        SavedPlacement placement = placements.get(key);
+        if (placement == null || placement.retired()) {
+            return;
+        }
+
+        placements.put(key, copyPlacement(
+                placement,
+                placement.lootContainers(),
+                placement.lootContainersScanned(),
+                placement.lastRestockTime(),
+                placement.nextRestockTime(),
+                placement.sizeX(),
+                placement.sizeY(),
+                placement.sizeZ(),
+                true,
+                placement.playerTouched(),
+                retiredTime,
+                placement.cleanupBlocks(),
+                placement.restoreBlocks()
         ));
         markDirty();
     }
@@ -234,6 +395,33 @@ public class BreachedStructurePlacementState extends PersistentState {
             placementNbt.putBoolean(LOOT_CONTAINERS_SCANNED_KEY, placement.lootContainersScanned());
             placementNbt.putLong(LAST_RESTOCK_TIME_KEY, placement.lastRestockTime());
             placementNbt.putLong(NEXT_RESTOCK_TIME_KEY, placement.nextRestockTime());
+            placementNbt.putInt(SIZE_X_KEY, placement.sizeX());
+            placementNbt.putInt(SIZE_Y_KEY, placement.sizeY());
+            placementNbt.putInt(SIZE_Z_KEY, placement.sizeZ());
+            placementNbt.putBoolean(RETIRED_KEY, placement.retired());
+            placementNbt.putBoolean(PLAYER_TOUCHED_KEY, placement.playerTouched());
+            placementNbt.putLong(NEXT_MINOR_DESPAWN_TIME_KEY, placement.nextMinorDespawnTime());
+
+            NbtList cleanupBlockList = new NbtList();
+            for (BlockPos cleanupBlock : placement.cleanupBlocks()) {
+                NbtCompound cleanupBlockNbt = new NbtCompound();
+                cleanupBlockNbt.putInt(X_KEY, cleanupBlock.getX());
+                cleanupBlockNbt.putInt(Y_KEY, cleanupBlock.getY());
+                cleanupBlockNbt.putInt(Z_KEY, cleanupBlock.getZ());
+                cleanupBlockList.add(cleanupBlockNbt);
+            }
+            placementNbt.put(CLEANUP_BLOCKS_KEY, cleanupBlockList);
+
+            NbtList restoreBlockList = new NbtList();
+            for (SavedBlockSnapshot restoreBlock : placement.restoreBlocks()) {
+                NbtCompound restoreBlockNbt = new NbtCompound();
+                restoreBlockNbt.putInt(X_KEY, restoreBlock.pos().getX());
+                restoreBlockNbt.putInt(Y_KEY, restoreBlock.pos().getY());
+                restoreBlockNbt.putInt(Z_KEY, restoreBlock.pos().getZ());
+                restoreBlockNbt.put(BLOCK_STATE_KEY, restoreBlock.stateNbt().copy());
+                restoreBlockList.add(restoreBlockNbt);
+            }
+            placementNbt.put(RESTORE_BLOCKS_KEY, restoreBlockList);
 
             NbtList lootContainerList = new NbtList();
             for (SavedLootContainer lootContainer : placement.lootContainers()) {
@@ -296,7 +484,15 @@ public class BreachedStructurePlacementState extends PersistentState {
                         readLootContainers(placementNbt.get()),
                         placementNbt.get().getBoolean(LOOT_CONTAINERS_SCANNED_KEY, false),
                         lastRestockTime,
-                        placementNbt.get().getLong(NEXT_RESTOCK_TIME_KEY, lastRestockTime)
+                        placementNbt.get().getLong(NEXT_RESTOCK_TIME_KEY, lastRestockTime),
+                        placementNbt.get().getInt(SIZE_X_KEY, 0),
+                        placementNbt.get().getInt(SIZE_Y_KEY, 0),
+                        placementNbt.get().getInt(SIZE_Z_KEY, 0),
+                        placementNbt.get().getBoolean(RETIRED_KEY, false),
+                        placementNbt.get().getBoolean(PLAYER_TOUCHED_KEY, false),
+                        placementNbt.get().getLong(NEXT_MINOR_DESPAWN_TIME_KEY, 0L),
+                        readCleanupBlocks(placementNbt.get()),
+                        readRestoreBlocks(placementNbt.get())
                 ));
             }
         }
@@ -370,6 +566,44 @@ public class BreachedStructurePlacementState extends PersistentState {
         return lootContainers;
     }
 
+    private static List<BlockPos> readCleanupBlocks(NbtCompound placementNbt) {
+        List<BlockPos> cleanupBlocks = new ArrayList<>();
+        NbtList cleanupBlockList = placementNbt.getListOrEmpty(CLEANUP_BLOCKS_KEY);
+        for (int index = 0; index < cleanupBlockList.size(); index++) {
+            NbtCompound cleanupBlockNbt = cleanupBlockList.getCompoundOrEmpty(index);
+            cleanupBlocks.add(new BlockPos(
+                    cleanupBlockNbt.getInt(X_KEY, 0),
+                    cleanupBlockNbt.getInt(Y_KEY, 0),
+                    cleanupBlockNbt.getInt(Z_KEY, 0)
+            ));
+        }
+
+        return cleanupBlocks;
+    }
+
+    private static List<SavedBlockSnapshot> readRestoreBlocks(NbtCompound placementNbt) {
+        List<SavedBlockSnapshot> restoreBlocks = new ArrayList<>();
+        NbtList restoreBlockList = placementNbt.getListOrEmpty(RESTORE_BLOCKS_KEY);
+        for (int index = 0; index < restoreBlockList.size(); index++) {
+            NbtCompound restoreBlockNbt = restoreBlockList.getCompoundOrEmpty(index);
+            Optional<NbtCompound> stateNbt = restoreBlockNbt.getCompound(BLOCK_STATE_KEY);
+            if (stateNbt.isEmpty()) {
+                continue;
+            }
+
+            restoreBlocks.add(new SavedBlockSnapshot(
+                    new BlockPos(
+                            restoreBlockNbt.getInt(X_KEY, 0),
+                            restoreBlockNbt.getInt(Y_KEY, 0),
+                            restoreBlockNbt.getInt(Z_KEY, 0)
+                    ),
+                    stateNbt.get()
+            ));
+        }
+
+        return restoreBlocks;
+    }
+
     public record SavedPlacement(
             int centerX,
             int centerZ,
@@ -380,16 +614,76 @@ public class BreachedStructurePlacementState extends PersistentState {
             List<SavedLootContainer> lootContainers,
             boolean lootContainersScanned,
             long lastRestockTime,
-            long nextRestockTime
+            long nextRestockTime,
+            int sizeX,
+            int sizeY,
+            int sizeZ,
+            boolean retired,
+            boolean playerTouched,
+            long nextMinorDespawnTime,
+            List<BlockPos> cleanupBlocks,
+            List<SavedBlockSnapshot> restoreBlocks
     ) {
         public SavedPlacement {
             lootContainers = List.copyOf(lootContainers);
+            cleanupBlocks = List.copyOf(cleanupBlocks);
+            restoreBlocks = List.copyOf(restoreBlocks);
+            sizeX = Math.max(0, sizeX);
+            sizeY = Math.max(0, sizeY);
+            sizeZ = Math.max(0, sizeZ);
+        }
+
+        public boolean active() {
+            return !retired;
         }
     }
 
     public record SavedLootContainer(BlockPos pos, Identifier lootTableId, long lootTableSeed) {
     }
 
+    public record SavedBlockSnapshot(BlockPos pos, NbtCompound stateNbt) {
+        public SavedBlockSnapshot {
+            stateNbt = stateNbt.copy();
+        }
+    }
+
     public record ReservedPlacement(String structureKey, int candidateIndex, int x, int z) {
+    }
+
+    private static SavedPlacement copyPlacement(
+            SavedPlacement placement,
+            List<SavedLootContainer> lootContainers,
+            boolean lootContainersScanned,
+            long lastRestockTime,
+            long nextRestockTime,
+            int sizeX,
+            int sizeY,
+            int sizeZ,
+            boolean retired,
+            boolean playerTouched,
+            long nextMinorDespawnTime,
+            List<BlockPos> cleanupBlocks,
+            List<SavedBlockSnapshot> restoreBlocks
+    ) {
+        return new SavedPlacement(
+                placement.centerX(),
+                placement.centerZ(),
+                placement.originX(),
+                placement.originY(),
+                placement.originZ(),
+                placement.placedTime(),
+                lootContainers,
+                lootContainersScanned,
+                lastRestockTime,
+                nextRestockTime,
+                sizeX,
+                sizeY,
+                sizeZ,
+                retired,
+                playerTouched,
+                nextMinorDespawnTime,
+                cleanupBlocks,
+                restoreBlocks
+        );
     }
 }
