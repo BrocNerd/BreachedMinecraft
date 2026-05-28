@@ -76,7 +76,7 @@ public class LandlockBlock extends BlockWithEntity {
             player.sendMessage(Text.literal("You are already authorized on the maximum number of Landlocks."), false);
         }
 
-        player.sendMessage(Text.literal("Claim radius: " + LandlockClaimManager.CLAIM_RADIUS + " blocks."), false);
+        player.sendMessage(Text.literal("Claim size: " + LandlockClaimManager.CLAIM_SIZE + "x" + LandlockClaimManager.CLAIM_SIZE + "x" + LandlockClaimManager.CLAIM_SIZE + " blocks."), false);
         return ActionResult.SUCCESS;
     }
 

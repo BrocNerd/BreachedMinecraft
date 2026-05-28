@@ -6,7 +6,10 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.BlockView;
+import net.minecraft.world.World;
 import nrd.breached.item.BreacherItem;
+import nrd.breached.reinforcement.ReinforcementManager;
+import nrd.breached.reinforcement.ReinforcementVisibilityCache;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -31,6 +34,20 @@ public abstract class BlockBreakingDeltaMixin {
             return;
         }
 
-        cir.setReturnValue(breacherItem.getBlockBreakingDelta());
+        if (isReinforced(world, pos, state)) {
+            cir.setReturnValue(breacherItem.getBlockBreakingDelta());
+        }
+    }
+
+    private static boolean isReinforced(BlockView world, BlockPos pos, BlockState state) {
+        if (!(world instanceof World actualWorld)) {
+            return false;
+        }
+
+        if (ReinforcementManager.getTier(actualWorld, pos, state).isPresent()) {
+            return true;
+        }
+
+        return actualWorld.isClient() && ReinforcementVisibilityCache.hasVisibleTier(pos);
     }
 }

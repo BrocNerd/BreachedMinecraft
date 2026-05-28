@@ -15,8 +15,12 @@ import java.util.UUID;
 public class LandlockBlockEntity extends BlockEntity {
     private static final String OWNER_UUID_KEY = "owner_uuid";
     private static final String AUTHORIZED_PLAYERS_KEY = "authorized_players";
+    private static final String CLAIM_CENTER_X_KEY = "claim_center_x";
+    private static final String CLAIM_CENTER_Y_KEY = "claim_center_y";
+    private static final String CLAIM_CENTER_Z_KEY = "claim_center_z";
 
     private UUID ownerUuid;
+    private BlockPos claimCenter;
     private final Set<UUID> authorizedPlayers = new HashSet<>();
 
     public LandlockBlockEntity(BlockPos pos, BlockState state) {
@@ -59,12 +63,26 @@ public class LandlockBlockEntity extends BlockEntity {
         return authorizedPlayers;
     }
 
+    public BlockPos getClaimCenter() {
+        return claimCenter == null ? getPos() : claimCenter;
+    }
+
+    public void setClaimCenter(BlockPos claimCenter) {
+        this.claimCenter = claimCenter.toImmutable();
+        markDirty();
+    }
+
     @Override
     protected void readData(ReadView view) {
         super.readData(view);
         ownerUuid = view.getOptionalString(OWNER_UUID_KEY)
                 .map(LandlockBlockEntity::parseUuid)
                 .orElse(null);
+        claimCenter = new BlockPos(
+                view.getInt(CLAIM_CENTER_X_KEY, getPos().getX()),
+                view.getInt(CLAIM_CENTER_Y_KEY, getPos().getY()),
+                view.getInt(CLAIM_CENTER_Z_KEY, getPos().getZ())
+        );
         authorizedPlayers.clear();
         authorizedPlayers.addAll(view.read(AUTHORIZED_PLAYERS_KEY, Uuids.SET_CODEC).orElse(Set.of()));
     }
@@ -78,6 +96,11 @@ public class LandlockBlockEntity extends BlockEntity {
         }
 
         view.put(AUTHORIZED_PLAYERS_KEY, Uuids.SET_CODEC, authorizedPlayers);
+
+        BlockPos center = getClaimCenter();
+        view.putInt(CLAIM_CENTER_X_KEY, center.getX());
+        view.putInt(CLAIM_CENTER_Y_KEY, center.getY());
+        view.putInt(CLAIM_CENTER_Z_KEY, center.getZ());
     }
 
     private static UUID parseUuid(String value) {

@@ -23,6 +23,7 @@ public final class BreachedConfig {
     public int plannedCandidateEvaluationsPerStructureTick = 4;
     public MinorPoiSettings minorPoi = new MinorPoiSettings();
     public MajorStructureLootSettings majorStructureLoot = new MajorStructureLootSettings();
+    public DiagnosticsSettings diagnostics = new DiagnosticsSettings();
     public Map<String, StructureSettings> structures = createDefaultStructureSettings();
 
     public static BreachedConfig load() {
@@ -121,6 +122,10 @@ public final class BreachedConfig {
             majorStructureLoot = new MajorStructureLootSettings();
         }
         majorStructureLoot.normalize();
+        if (diagnostics == null) {
+            diagnostics = new DiagnosticsSettings();
+        }
+        diagnostics.normalize();
 
         if (structures == null) {
             structures = createDefaultStructureSettings();
@@ -207,6 +212,15 @@ public final class BreachedConfig {
             minRestockIntervalTicks = clamp(minRestockIntervalTicks, 20, 1728000);
             maxRestockIntervalTicks = clamp(Math.max(maxRestockIntervalTicks, minRestockIntervalTicks), 20, 1728000);
             scanIntervalTicks = clamp(scanIntervalTicks, 20, 72000);
+        }
+    }
+
+    public static final class DiagnosticsSettings {
+        public boolean structureTickLoggingEnabled = false;
+        public int slowStructureTickThresholdMs = 50;
+
+        private void normalize() {
+            slowStructureTickThresholdMs = clamp(slowStructureTickThresholdMs, 1, 60000);
         }
     }
 
