@@ -146,9 +146,15 @@ public final class BreachedConfig {
         settings.put("breached:horace", new StructureSettings(64, null, null));
         settings.put("breached:pinktree", new StructureSettings(96, null, null));
         settings.put("breached:bigboat", new StructureSettings(96, null, null));
+        settings.put("breached:eyeball", new StructureSettings(64, null, null));
+        settings.put("breached:death", new StructureSettings(null, null, null));
         settings.put("breached:cavehut", new StructureSettings(null, null, null));
         settings.put("breached:pueblo1", new StructureSettings(null, null, null));
         settings.put("breached:pueblo2", new StructureSettings(null, null, null));
+        settings.put("breached:tinyhome1", new StructureSettings(null, null, null));
+        settings.put("breached:tinyhome2", new StructureSettings(null, null, null));
+        settings.put("breached:belltower", new StructureSettings(null, null, null));
+        settings.put("breached:skyhome", new StructureSettings(null, null, null));
         settings.put("breached:raft", new StructureSettings(null, null, null));
         settings.put("breached:waystop", new StructureSettings(null, null, null));
         return settings;

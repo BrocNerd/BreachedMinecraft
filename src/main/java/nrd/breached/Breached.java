@@ -18,6 +18,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.block.DoorBlock;
 import net.minecraft.block.FenceGateBlock;
 import net.minecraft.block.TrapdoorBlock;
+import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.passive.VillagerEntity;
@@ -109,13 +110,13 @@ public class Breached implements ModInitializer {
     public static final Item DIAMOND_BREACHER = registerItem(
             "diamond_breacher",
             settings -> new BreacherItem(settings, BreacherItem.DIAMOND_BLOCK_BREAKING_DELTA, ToolMaterial.DIAMOND),
-            new Item.Settings().maxDamage(512)
+            new Item.Settings().maxDamage(256)
     );
 
     public static final Item NETHERITE_BREACHER = registerItem(
             "netherite_breacher",
             settings -> new BreacherItem(settings, BreacherItem.NETHERITE_BLOCK_BREAKING_DELTA, ToolMaterial.NETHERITE),
-            new Item.Settings().maxDamage(2048).fireproof()
+            new Item.Settings().maxDamage(1024).fireproof()
     );
 
     public static final Item PROBE = registerItem(
@@ -298,14 +299,42 @@ public class Breached implements ModInitializer {
             }
 
             ItemStack stack = player.getMainHandStack();
-            if (!(stack.getItem() instanceof BreacherItem)
-                    || ReinforcementManager.getTier(world, pos, state).isEmpty()
-                    || ReinforcementManager.hasEnoughDurability(stack, world, pos, state)) {
+            java.util.Optional<ReinforcementTier> reinforcementTier = ReinforcementManager.getTier(world, pos, state);
+            if (reinforcementTier.isEmpty()) {
                 return true;
             }
 
-            ReinforcementManager.breakBreacher(stack, serverWorld, serverPlayer);
-            player.sendMessage(Text.literal("Your Breacher broke against the reinforced block."), false);
+            if (stack.isOf(REINFORCER)) {
+                if (state.isOf(LANDLOCK_BLOCK)) {
+                    if (isLandlockOwner(world, pos, blockEntity, player)) {
+                        return true;
+                    }
+
+                    player.sendMessage(Text.literal("Only the Landlock owner can break it with a Reinforcer."), false);
+                    return false;
+                }
+
+                if (!LandlockClaimManager.canPlayerModify(world, player, pos)) {
+                    player.sendMessage(Text.literal("You must be authorized on this Landlock to remove reinforcement."), false);
+                    return false;
+                }
+
+                ReinforcementManager.removeStoredTier(serverWorld, pos);
+                player.sendMessage(Text.literal("Removed " + reinforcementTier.get().displayName() + " reinforcement."), false);
+                return false;
+            }
+
+            if (stack.getItem() instanceof BreacherItem) {
+                if (ReinforcementManager.hasEnoughDurability(stack, world, pos, state)) {
+                    return true;
+                }
+
+                ReinforcementManager.breakBreacher(stack, serverWorld, serverPlayer);
+                player.sendMessage(Text.literal("Your Breacher broke against the reinforced block."), false);
+                return false;
+            }
+
+            player.sendMessage(Text.literal("Reinforced blocks require a Breacher to break or a Reinforcer to unreinforce."), false);
             return false;
         });
 
@@ -320,6 +349,12 @@ public class Breached implements ModInitializer {
 
             ReinforcementManager.removeStoredTier(serverWorld, pos);
         });
+    }
+
+    private static boolean isLandlockOwner(World world, BlockPos pos, BlockEntity blockEntity, PlayerEntity player) {
+        BlockEntity resolvedBlockEntity = blockEntity != null ? blockEntity : world.getBlockEntity(pos);
+        return resolvedBlockEntity instanceof LandlockBlockEntity landlock
+                && player.getUuid().equals(landlock.getOwnerUuid());
     }
 
     private static void registerReinforcementOutlineSync() {

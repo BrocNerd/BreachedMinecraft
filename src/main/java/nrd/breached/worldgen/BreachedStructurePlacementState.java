@@ -42,6 +42,8 @@ public class BreachedStructurePlacementState extends PersistentState {
     private static final String RESTORE_BLOCKS_KEY = "restore_blocks";
     private static final String STRUCTURE_KEY = "structure_key";
     private static final String CANDIDATE_INDEX_KEY = "candidate_index";
+    private static final String PORTAL_EVENT_END_TIME_KEY = "portal_event_end_time";
+    private static final String PORTAL_EVENT_WARNINGS_KEY = "portal_event_warnings";
     private static final String X_KEY = "x";
     private static final String Y_KEY = "y";
     private static final String Z_KEY = "z";
@@ -62,6 +64,8 @@ public class BreachedStructurePlacementState extends PersistentState {
     private final Map<String, SavedPlacement> placements = new HashMap<>();
     private final Map<String, ReservedPlacement> reservations = new HashMap<>();
     private final Map<String, Set<Integer>> failedCandidates = new HashMap<>();
+    private long portalEventEndTime;
+    private final Set<Integer> portalEventWarnings = new HashSet<>();
 
     public static BreachedStructurePlacementState get(MinecraftServer server) {
         return server.getOverworld().getPersistentStateManager().getOrCreate(TYPE);
@@ -377,11 +381,45 @@ public class BreachedStructurePlacementState extends PersistentState {
         markDirty();
     }
 
+    public long getPortalEventEndTime() {
+        return portalEventEndTime;
+    }
+
+    public boolean isPortalEventActive(long worldTime) {
+        return portalEventEndTime > worldTime;
+    }
+
+    public void startPortalEvent(long endTime) {
+        portalEventEndTime = endTime;
+        portalEventWarnings.clear();
+        markDirty();
+    }
+
+    public boolean markPortalEventWarningSent(int secondsRemaining) {
+        boolean added = portalEventWarnings.add(secondsRemaining);
+        if (added) {
+            markDirty();
+        }
+
+        return added;
+    }
+
+    public void clearPortalEvent() {
+        if (portalEventEndTime == 0L && portalEventWarnings.isEmpty()) {
+            return;
+        }
+
+        portalEventEndTime = 0L;
+        portalEventWarnings.clear();
+        markDirty();
+    }
+
     private NbtCompound toNbt() {
         NbtCompound root = new NbtCompound();
         NbtCompound placementRoot = new NbtCompound();
         NbtCompound reservationRoot = new NbtCompound();
         NbtCompound failedRoot = new NbtCompound();
+        NbtCompound portalWarningRoot = new NbtCompound();
 
         for (Map.Entry<String, SavedPlacement> entry : placements.entrySet()) {
             SavedPlacement placement = entry.getValue();
@@ -459,11 +497,17 @@ public class BreachedStructurePlacementState extends PersistentState {
         root.put(PLACEMENTS_KEY, placementRoot);
         root.put(RESERVATIONS_KEY, reservationRoot);
         root.put(FAILED_CANDIDATES_KEY, failedRoot);
+        root.putLong(PORTAL_EVENT_END_TIME_KEY, portalEventEndTime);
+        for (int warning : portalEventWarnings) {
+            portalWarningRoot.putBoolean(Integer.toString(warning), true);
+        }
+        root.put(PORTAL_EVENT_WARNINGS_KEY, portalWarningRoot);
         return root;
     }
 
     private static BreachedStructurePlacementState fromNbt(NbtCompound root) {
         BreachedStructurePlacementState state = new BreachedStructurePlacementState();
+        state.portalEventEndTime = root.getLong(PORTAL_EVENT_END_TIME_KEY, 0L);
         Optional<NbtCompound> placementRoot = root.getCompound(PLACEMENTS_KEY);
         if (placementRoot.isPresent()) {
             for (String key : placementRoot.get().getKeys()) {
@@ -531,6 +575,16 @@ public class BreachedStructurePlacementState extends PersistentState {
                 }
 
                 state.failedCandidates.put(key, failedIndexes);
+            }
+        }
+
+        Optional<NbtCompound> portalWarningRoot = root.getCompound(PORTAL_EVENT_WARNINGS_KEY);
+        if (portalWarningRoot.isPresent()) {
+            for (String warning : portalWarningRoot.get().getKeys()) {
+                try {
+                    state.portalEventWarnings.add(Integer.parseInt(warning));
+                } catch (NumberFormatException ignored) {
+                }
             }
         }
 

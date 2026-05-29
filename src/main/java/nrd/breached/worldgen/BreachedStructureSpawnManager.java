@@ -10,6 +10,7 @@ import net.minecraft.nbt.NbtHelper;
 import net.minecraft.nbt.NbtList;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.state.property.Properties;
 import net.minecraft.structure.StructurePlacementData;
@@ -211,7 +212,7 @@ public final class BreachedStructureSpawnManager {
         List<Integer> zSamples = createSamples(originZ, originZ + footprintSize.getZ() - 1, definition.sampleStep());
         for (int x : xSamples) {
             for (int z : zSamples) {
-                int surfaceY = getSurfaceY(world, x, z);
+                int surfaceY = getSurfaceY(world, definition, x, z);
                 BlockState surfaceState = world.getBlockState(new BlockPos(x, surfaceY - 1, z));
                 if (surfaceState.isOf(Blocks.WATER) || surfaceState.isOf(Blocks.LAVA)) {
                     liquidSamples++;
@@ -237,7 +238,7 @@ public final class BreachedStructureSpawnManager {
 
         int score = heightRange * 100_000 + distanceScore;
         int surfaceY = switch (definition.heightSelection()) {
-            case ORIGIN_SURFACE -> getSurfaceY(world, originX, originZ);
+            case ORIGIN_SURFACE -> getSurfaceY(world, definition, originX, originZ);
             case MEDIAN_SURFACE -> getMedianSurfaceY(surfaceHeights);
         };
 
@@ -384,6 +385,24 @@ public final class BreachedStructureSpawnManager {
     public static int getSurfaceY(ServerWorld world, int x, int z) {
         world.getChunk(Math.floorDiv(x, 16), Math.floorDiv(z, 16));
         return world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+    }
+
+    private static int getSurfaceY(ServerWorld world, BreachedStructureDefinition definition, int x, int z) {
+        int surfaceY = getSurfaceY(world, x, z);
+        if (!shouldIgnoreTreeSurface(definition)) {
+            return surfaceY;
+        }
+
+        while (surfaceY > world.getBottomY() + 1
+                && world.getBlockState(new BlockPos(x, surfaceY - 1, z)).isIn(BlockTags.LOGS)) {
+            surfaceY--;
+        }
+
+        return surfaceY;
+    }
+
+    private static boolean shouldIgnoreTreeSurface(BreachedStructureDefinition definition) {
+        return BreachedStructureDefinitions.isForestTolerantGroundMinorPoi(definition);
     }
 
     private static Optional<String> getSurfaceRejectionReason(

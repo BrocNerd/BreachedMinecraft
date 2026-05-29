@@ -15,7 +15,7 @@ import java.util.Map;
 import java.util.Optional;
 
 public final class ReinforcementManager {
-    private static final int NORMAL_BREACHER_DURABILITY_COST = 1;
+    private static final int NORMAL_BREACHER_DURABILITY_COST = 4;
 
     private ReinforcementManager() {
     }
@@ -56,9 +56,9 @@ public final class ReinforcementManager {
     }
 
     public static int getBreacherDurabilityCost(World world, BlockPos pos, BlockState state) {
-        return NORMAL_BREACHER_DURABILITY_COST + getTier(world, pos, state)
+        return getTier(world, pos, state)
                 .map(ReinforcementTier::durabilityCost)
-                .orElse(0);
+                .orElse(NORMAL_BREACHER_DURABILITY_COST);
     }
 
     public static boolean hasEnoughDurability(ItemStack stack, World world, BlockPos pos, BlockState state) {

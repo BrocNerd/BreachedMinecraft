@@ -8,7 +8,7 @@ import net.minecraft.block.Block;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.LeavesBlock;
-import net.minecraft.block.PillarBlock;
+import net.minecraft.block.NetherPortalBlock;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.inventory.Inventory;
@@ -18,7 +18,10 @@ import net.minecraft.loot.LootTable;
 import net.minecraft.nbt.NbtHelper;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.item.ItemPlacementContext;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.structure.StructureTemplate;
 import net.minecraft.text.Text;
@@ -26,6 +29,7 @@ import net.minecraft.util.ActionResult;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3i;
 import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
@@ -35,6 +39,7 @@ import nrd.breached.landlock.LandlockClaimManager;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,6 +56,35 @@ public final class BreachedStructurePlacementManager {
     private static final int MAX_FORCED_MINOR_DESPAWN_CHUNK_TICKS = 200;
     private static final int MAX_PLANNED_STRUCTURE_COMPLETIONS_PER_TICK = 1;
     private static final int REMOVE_BLOCK_WITHOUT_DROPS_FLAGS = Block.NOTIFY_LISTENERS | Block.SKIP_DROPS;
+    private static final int PORTAL_EVENT_DURATION_TICKS = 20 * 60 * 60;
+    private static final int PORTAL_MIN_RESTOCK_INTERVAL_TICKS = 20 * 60 * 65;
+    private static final int PORTAL_MAX_RESTOCK_INTERVAL_TICKS = 20 * 60 * 120;
+    private static final int PORTAL_EVENT_TICK_INTERVAL = 20;
+    private static final int MAX_PORTAL_FRAME_INTERIOR_WIDTH = 21;
+    private static final int MAX_PORTAL_FRAME_INTERIOR_HEIGHT = 21;
+    private static final int[] PORTAL_EVENT_WARNING_SECONDS = {
+            30 * 60,
+            5 * 60,
+            60,
+            30,
+            15,
+            5,
+            4,
+            3,
+            2,
+            1
+    };
+    private static final String PORTAL_STRUCTURE_KEY = BreachedStructureDefinitions.key(BreachedStructureDefinitions.OFFICIAL_NETHER_PORTAL);
+    private static final String EYEBALL_STRUCTURE_KEY = BreachedStructureDefinitions.key(BreachedStructureDefinitions.EYEBALL);
+    private static final String SKYHOME_STRUCTURE_KEY = BreachedStructureDefinitions.key(BreachedStructureDefinitions.SKY_HOME);
+    private static final int EYEBALL_BORDER_MARGIN_BLOCKS = 100;
+    private static final int EYEBALL_CANDIDATE_SPREAD_BLOCKS = 48;
+    private static final int EYEBALL_ORIGIN_Y = 200;
+    private static final int SKYHOME_MIN_ORIGIN_Y = 120;
+    private static final int SKYHOME_MAX_ORIGIN_Y = 200;
+    private static final int BIG_BOAT_MIN_EXPANDED_CANDIDATES = 384;
+    private static final int BIG_BOAT_MAX_EXPANDED_CANDIDATES = 768;
+    private static final int MINOR_FOREST_VEGETATION_OBSTRUCTION_LIMIT = 256;
     private static final int MINOR_POI_PLAYER_REPLACED_BLOCK_PERCENT = 25;
     private static final int MINOR_POI_CHUNK_INSET = 2;
     private static final Set<PendingStructurePlacement> PENDING_PLACEMENTS = new HashSet<>();
@@ -59,6 +93,7 @@ public final class BreachedStructurePlacementManager {
     private static final Set<ForcedMinorDespawnChunk> FORCED_MINOR_DESPAWN_CHUNKS = new HashSet<>();
     private static final Set<PendingMinorPoiChunk> PENDING_MINOR_POI_CHUNKS = new HashSet<>();
     private static final Set<Long> COMPLETED_PLANNED_STRUCTURE_WORLDS = new HashSet<>();
+    private static final Map<String, Set<BlockPos>> EXACT_PROTECTION_BLOCKS = new HashMap<>();
 
     private BreachedStructurePlacementManager() {
     }
@@ -118,17 +153,19 @@ public final class BreachedStructurePlacementManager {
             return;
         }
 
-        boolean hasScheduledWork = hasScheduledPlacementWork(world);
-        if (!hasScheduledWork && COMPLETED_PLANNED_STRUCTURE_WORLDS.contains(world.getSeed())) {
-            return;
-        }
-
         StructureTickDiagnostics diagnostics = new StructureTickDiagnostics(world.getTime());
         long tickStartNanos = System.nanoTime();
         try {
             long sectionStartNanos = System.nanoTime();
             BreachedStructurePlacementState state = BreachedStructurePlacementState.get(world.getServer());
             migrateLegacyCentralSpawnState(world, state);
+            tickPortalEvent(world, state);
+
+            boolean hasScheduledWork = hasScheduledPlacementWork(world);
+            if (!hasScheduledWork && COMPLETED_PLANNED_STRUCTURE_WORLDS.contains(world.getSeed())) {
+                diagnostics.stateSetupNanos += elapsedSince(sectionStartNanos);
+                return;
+            }
 
             boolean hasForcedStructureChunks = hasForcedStructureChunksForWorld(world);
             boolean hasPlannedWork = !COMPLETED_PLANNED_STRUCTURE_WORLDS.contains(world.getSeed())
@@ -541,15 +578,17 @@ public final class BreachedStructurePlacementManager {
             return skippedUnloadedFootprint ? MinorPoiAttemptResult.NOT_READY : MinorPoiAttemptResult.FAILED;
         }
 
-        int originY = getPlacementOriginY(bestChoice.definition(), bestChoice.site());
+        int originY = getPlacementOriginY(world, bestChoice.definition(), bestChoice.site());
         BlockPos origin = new BlockPos(bestChoice.originX(), originY, bestChoice.originZ());
+        Vec3i footprintSize = BreachedStructureSpawnManager.getRotatedSize(bestChoice.template().getSize(), bestChoice.definition().rotation());
         List<BreachedStructurePlacementState.SavedBlockSnapshot> restoreBlocks = captureOriginalMinorPoiBlocks(
                 world,
                 bestChoice.definition(),
                 bestChoice.template(),
                 origin,
-                BreachedStructureSpawnManager.getRotatedSize(bestChoice.template().getSize(), bestChoice.definition().rotation())
+                footprintSize
         );
+        int clearedVegetation = clearMinorPoiVegetationInFootprint(world, bestChoice.definition(), origin, footprintSize);
         BreachedStructurePlacement placement = BreachedStructureSpawnManager.place(
                 world,
                 bestChoice.definition(),
@@ -577,6 +616,10 @@ public final class BreachedStructurePlacementManager {
                 + ", y " + placement.origin().getY()
                 + ", z " + placement.origin().getZ()
                 + " score " + Math.round(bestChoice.score()) + ".");
+        if (clearedVegetation > 0) {
+            System.out.println("[Breached] Cleared " + clearedVegetation
+                    + " vegetation blocks before placing minor POI " + bestChoice.definition().logName() + ".");
+        }
         return MinorPoiAttemptResult.PLACED;
     }
 
@@ -726,7 +769,7 @@ public final class BreachedStructurePlacementManager {
             Vec3i footprintSize,
             Map<BlockPos, BreachedStructurePlacementState.SavedBlockSnapshot> snapshots
     ) {
-        if (!definition.canClearBlocks()) {
+        if (!definition.canClearBlocks() && !isForestTolerantMinorPoi(definition)) {
             return;
         }
 
@@ -735,12 +778,39 @@ public final class BreachedStructurePlacementManager {
             for (int z = origin.getZ(); z < origin.getZ() + footprintSize.getZ(); z++) {
                 for (int y = origin.getY(); y <= maxY; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
-                    if (isNaturalSurfaceObstruction(world.getBlockState(pos))) {
+                    if (shouldSnapshotMinorPoiClearanceBlock(definition, world.getBlockState(pos))) {
                         captureOriginalBlockSnapshot(world, pos, snapshots);
                     }
                 }
             }
         }
+    }
+
+    private static int clearMinorPoiVegetationInFootprint(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BlockPos origin,
+            Vec3i footprintSize
+    ) {
+        if (!isForestTolerantMinorPoi(definition)) {
+            return 0;
+        }
+
+        int clearedBlocks = 0;
+        int maxY = Math.min(world.getTopYInclusive(), origin.getY() + footprintSize.getY() + 5);
+        for (int x = origin.getX(); x < origin.getX() + footprintSize.getX(); x++) {
+            for (int z = origin.getZ(); z < origin.getZ() + footprintSize.getZ(); z++) {
+                for (int y = origin.getY(); y <= maxY; y++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    if (isVegetation(world.getBlockState(pos))) {
+                        removeBlockWithoutDrops(world, pos);
+                        clearedBlocks++;
+                    }
+                }
+            }
+        }
+
+        return clearedBlocks;
     }
 
     private static void captureOriginalBlockSnapshot(
@@ -928,8 +998,7 @@ public final class BreachedStructurePlacementManager {
             return;
         }
 
-        int removedBlocks = 0;
-        removedBlocks = removeMatchingMinorPoiBlocks(world, expectedBlocks);
+        int removedBlocks = removeMatchingMinorPoiBlocks(world, expectedBlocks);
         removedBlocks += removeMatchingCleanupBlocks(world, definition, placement.cleanupBlocks());
         int restoredBlocks = restoreOriginalMinorPoiBlocks(world, placement.restoreBlocks());
 
@@ -1539,7 +1608,7 @@ public final class BreachedStructurePlacementManager {
                 definition,
                 evaluation.template(),
                 getPlacementOriginX(definition, candidate),
-                getPlacementOriginY(definition, evaluation.site()),
+                getPlacementOriginY(world, definition, evaluation.site()),
                 getPlacementOriginZ(definition, candidate),
                 definition.mirror(),
                 definition.rotation(),
@@ -1551,12 +1620,24 @@ public final class BreachedStructurePlacementManager {
                 placement,
                 world.getTime(),
                 getSavedLootContainers(world, definition, evaluation.template(), placement),
-                createNextMajorLootRestockTime(world, pendingPlacement.placementKey())
+                createNextLootRestockTime(world, pendingPlacement.placementKey())
         );
-        System.out.println("[Breached] Registered protected structure " + definition.logName()
-                + " around x " + BreachedStructureSpawnManager.getProtectedCenterX(placement)
-                + ", z " + BreachedStructureSpawnManager.getProtectedCenterZ(placement)
-                + " radius " + definition.protectionRadius() + ".");
+        if (isPortalStructure(definition)) {
+            if (state.isPortalEventActive(world.getTime())) {
+                lightOfficialPortalStructures(world, state);
+            } else {
+                closeOfficialPortalStructures(world, state);
+            }
+        }
+        if (isExactProtectedStructure(definition)) {
+            System.out.println("[Breached] Registered protected structure " + definition.logName()
+                    + " using exact template-block protection.");
+        } else if (definition.protectedStructure()) {
+            System.out.println("[Breached] Registered protected structure " + definition.logName()
+                    + " around x " + BreachedStructureSpawnManager.getProtectedCenterX(placement)
+                    + ", z " + BreachedStructureSpawnManager.getProtectedCenterZ(placement)
+                    + " radius " + definition.protectionRadius() + ".");
+        }
         return PlacementAttemptResult.PLACED;
     }
 
@@ -1604,10 +1685,42 @@ public final class BreachedStructurePlacementManager {
     }
 
     private static int getPlacementOriginY(
+            ServerWorld world,
             BreachedStructureDefinition definition,
             BreachedStructureSite site
     ) {
+        if (definition.structureId().equals(BreachedStructureDefinitions.EYEBALL.structureId())) {
+            return EYEBALL_ORIGIN_Y;
+        }
+
+        if (isSkyHomeStructure(definition)) {
+            return getSkyHomeOriginY(world, definition, site);
+        }
+
         return site.surfaceY() + definition.placementOffsetY();
+    }
+
+    private static boolean isSkyHomeStructure(BreachedStructureDefinition definition) {
+        return BreachedStructureDefinitions.key(definition).equals(SKYHOME_STRUCTURE_KEY);
+    }
+
+    private static boolean isBigBoatStructure(BreachedStructureDefinition definition) {
+        return definition.structureId().equals(BreachedStructureDefinitions.BIG_BOAT.structureId());
+    }
+
+    private static int getSkyHomeOriginY(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructureSite site
+    ) {
+        int heightRange = SKYHOME_MAX_ORIGIN_Y - SKYHOME_MIN_ORIGIN_Y + 1;
+        java.util.Random random = new java.util.Random(
+                world.getSeed()
+                        ^ definition.seedSalt()
+                        ^ ((long) site.originX() * 341873128712L)
+                        ^ ((long) site.originZ() * 132897987541L)
+        );
+        return SKYHOME_MIN_ORIGIN_Y + random.nextInt(heightRange);
     }
 
     private static int getPlacementOriginZ(
@@ -1668,11 +1781,89 @@ public final class BreachedStructurePlacementManager {
             ServerWorld world,
             BreachedStructureDefinition definition
     ) {
+        if (definition.structureId().equals(BreachedStructureDefinitions.EYEBALL.structureId())) {
+            return generateEyeballCornerCandidates(world, definition);
+        }
+
+        if (isBigBoatStructure(definition)) {
+            return generateBigBoatExpandedCandidates(world, definition);
+        }
+
         if (definition.structureId().equals(BreachedStructureDefinitions.SWORD_STATUE.structureId())) {
             return generateSwordStatueCandidatesOpposedToPinkTree(world, definition);
         }
 
         return generateRadiusCandidates(world, definition);
+    }
+
+    private static List<BreachedStructureSpawnManager.RadiusCandidate> generateEyeballCornerCandidates(
+            ServerWorld world,
+            BreachedStructureDefinition definition
+    ) {
+        Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, definition);
+        Vec3i footprintSize = template
+                .map(value -> BreachedStructureSpawnManager.getRotatedSize(value.getSize(), definition.rotation()))
+                .orElse(new Vec3i(1, 1, 1));
+        int sizeX = Math.max(1, footprintSize.getX());
+        int sizeZ = Math.max(1, footprintSize.getZ());
+
+        double borderSize = getEffectiveOverworldBorderSize(world);
+        double borderHalfSize = borderSize / 2.0D;
+        int minBorderX = (int) Math.ceil(world.getWorldBorder().getCenterX() - borderHalfSize);
+        int maxBorderX = (int) Math.floor(world.getWorldBorder().getCenterX() + borderHalfSize);
+        int minBorderZ = (int) Math.ceil(world.getWorldBorder().getCenterZ() - borderHalfSize);
+        int maxBorderZ = (int) Math.floor(world.getWorldBorder().getCenterZ() + borderHalfSize);
+
+        int minOriginX = minBorderX + EYEBALL_BORDER_MARGIN_BLOCKS;
+        int maxOriginX = maxBorderX - EYEBALL_BORDER_MARGIN_BLOCKS - sizeX;
+        int minOriginZ = minBorderZ + EYEBALL_BORDER_MARGIN_BLOCKS;
+        int maxOriginZ = maxBorderZ - EYEBALL_BORDER_MARGIN_BLOCKS - sizeZ;
+        int baseOriginX = minOriginX;
+        int baseOriginZ = maxOriginZ;
+
+        int candidateCount = Math.max(definition.countPerWorld(), definition.plannedCandidateCount());
+        List<BreachedStructureSpawnManager.RadiusCandidate> candidates = new ArrayList<>();
+        java.util.Random random = new java.util.Random(world.getSeed() ^ definition.seedSalt());
+        for (int candidateIndex = 0; candidateIndex < candidateCount; candidateIndex++) {
+            int xOffset = candidateIndex == 0 ? 0 : random.nextInt(EYEBALL_CANDIDATE_SPREAD_BLOCKS * 2 + 1) - EYEBALL_CANDIDATE_SPREAD_BLOCKS;
+            int zOffset = candidateIndex == 0 ? 0 : random.nextInt(EYEBALL_CANDIDATE_SPREAD_BLOCKS * 2 + 1) - EYEBALL_CANDIDATE_SPREAD_BLOCKS;
+            int x = clampStructureOrigin(baseOriginX + xOffset, minOriginX, maxOriginX);
+            int z = clampStructureOrigin(baseOriginZ + zOffset, minOriginZ, maxOriginZ);
+            int radius = distanceBetween(baseOriginX, baseOriginZ, x, z);
+            double angle = Math.atan2(z - baseOriginZ, x - baseOriginX);
+
+            candidates.add(new BreachedStructureSpawnManager.RadiusCandidate(candidateIndex + 1, x, z, radius, angle));
+        }
+
+        return candidates;
+    }
+
+    private static double getEffectiveOverworldBorderSize(ServerWorld world) {
+        double borderSize = world.getWorldBorder().getSize();
+        if (borderSize < 100_000.0D) {
+            return borderSize;
+        }
+
+        Optional<BreachedDimensionRules.BreachedPreset> preset = BreachedDimensionRules.getBreachedPreset(world.getServer());
+        if (preset.isPresent() && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL) {
+            return 1000.0D;
+        }
+
+        return 2500.0D;
+    }
+
+    private static int clampStructureOrigin(int value, int min, int max) {
+        if (min > max) {
+            return value;
+        }
+
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static int distanceBetween(int firstX, int firstZ, int secondX, int secondZ) {
+        long xDistance = secondX - firstX;
+        long zDistance = secondZ - firstZ;
+        return (int) Math.round(Math.sqrt(xDistance * xDistance + zDistance * zDistance));
     }
 
     private static List<BreachedStructureSpawnManager.RadiusCandidate> generateSwordStatueCandidatesOpposedToPinkTree(
@@ -1710,6 +1901,31 @@ public final class BreachedStructurePlacementManager {
                 definition.minRadius(),
                 definition.maxRadius(),
                 Math.max(definition.countPerWorld(), definition.plannedCandidateCount()),
+                definition.roughlyOpposed()
+        );
+    }
+
+    private static List<BreachedStructureSpawnManager.RadiusCandidate> generateBigBoatExpandedCandidates(
+            ServerWorld world,
+            BreachedStructureDefinition definition
+    ) {
+        int baseCandidateCount = Math.max(definition.countPerWorld(), definition.plannedCandidateCount());
+        int expandedCandidateCount = Math.max(
+                baseCandidateCount,
+                Math.min(
+                        BIG_BOAT_MAX_EXPANDED_CANDIDATES,
+                        Math.max(BIG_BOAT_MIN_EXPANDED_CANDIDATES, baseCandidateCount * 4)
+                )
+        );
+
+        return BreachedStructureSpawnManager.generateRadiusCandidates(
+                world.getSeed(),
+                definition.seedSalt(),
+                definition.centerX(),
+                definition.centerZ(),
+                definition.minRadius(),
+                definition.maxRadius(),
+                expandedCandidateCount,
                 definition.roughlyOpposed()
         );
     }
@@ -1777,9 +1993,15 @@ public final class BreachedStructurePlacementManager {
             return;
         }
 
-        int restockedStructures = 0;
-        int totalRestockedContainers = 0;
+        PortalRestockResult portalRestockResult = restockPortalStructureLoot(world, state, lootConfig, diagnostics);
+        int restockedStructures = portalRestockResult.restockedStructures();
+        int totalRestockedContainers = portalRestockResult.restockedContainers();
+        boolean portalRestocked = portalRestockResult.portalRestocked();
         for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> entry : new ArrayList<>(state.placements())) {
+            if (isPortalPlacement(entry.getKey())) {
+                continue;
+            }
+
             Optional<BreachedStructureDefinition> definition = getMajorDefinition(entry.getKey())
                     .map(baseDefinition -> getActiveDefinition(world, baseDefinition));
             if (definition.isEmpty() || !world.getRegistryKey().equals(definition.get().requiredDimension())) {
@@ -1849,11 +2071,463 @@ public final class BreachedStructurePlacementManager {
             }
         }
 
+        if (portalRestocked) {
+            startPortalEvent(world, state);
+        }
+
         if (totalRestockedContainers > 0) {
             System.out.println("[Breached] Announced major structure loot restock for "
                     + restockedStructures + " structures and "
                     + totalRestockedContainers + " containers.");
         }
+    }
+
+    private static PortalRestockResult restockPortalStructureLoot(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            BreachedConfig.MajorStructureLootSettings lootConfig,
+            StructureTickDiagnostics diagnostics
+    ) {
+        List<PortalRestockTarget> portalTargets = getPortalRestockTargets(world, state);
+        if (portalTargets.isEmpty()) {
+            return PortalRestockResult.NONE;
+        }
+
+        diagnostics.majorPlacementsScanned += portalTargets.size();
+        long sharedRestockTime = syncPortalRestockTimes(world, state, portalTargets);
+        if (world.getTime() < sharedRestockTime) {
+            return PortalRestockResult.NONE;
+        }
+
+        diagnostics.majorPlacementsDue += portalTargets.size();
+        portalTargets = getPortalRestockTargets(world, state);
+        List<PortalRestockTarget> readyTargets = new ArrayList<>();
+        boolean allTargetsReady = true;
+        for (PortalRestockTarget target : portalTargets) {
+            BreachedStructurePlacementState.SavedPlacement placement = target.placement();
+            if (!placement.lootContainersScanned()) {
+                if (!tryBackfillMajorLootContainers(
+                        world,
+                        state,
+                        target.placementKey(),
+                        target.definition(),
+                        placement,
+                        diagnostics
+                )) {
+                    allTargetsReady = false;
+                    continue;
+                }
+
+                placement = state.getPlacement(target.placementKey()).orElse(placement);
+            }
+
+            if (!placement.lootContainers().isEmpty() && !areLootContainersLoaded(world, placement.lootContainers())) {
+                forceLoadMissingRestockChunks(world, target.placementKey(), placement.lootContainers(), diagnostics);
+                allTargetsReady = false;
+                continue;
+            }
+
+            readyTargets.add(new PortalRestockTarget(target.placementKey(), target.definition(), placement));
+        }
+
+        if (!allTargetsReady) {
+            return PortalRestockResult.NONE;
+        }
+
+        long nextRestockTime = createNextPortalLootRestockTime(world);
+        int restockedStructures = 0;
+        int totalRestockedContainers = 0;
+        for (PortalRestockTarget target : readyTargets) {
+            BreachedStructurePlacementState.SavedPlacement placement = target.placement();
+            int restockedContainers = 0;
+            if (!placement.lootContainers().isEmpty()) {
+                diagnostics.majorLootContainersChecked += placement.lootContainers().size();
+                restockedContainers = restockLootContainers(world, target.placementKey(), placement.lootContainers());
+            }
+
+            releaseForcedRestockChunks(world, target.placementKey());
+            state.markLootRestocked(target.placementKey(), world.getTime(), nextRestockTime);
+            if (restockedContainers > 0) {
+                restockedStructures++;
+                totalRestockedContainers += restockedContainers;
+                diagnostics.majorStructuresRestocked++;
+                diagnostics.majorContainersRestocked += restockedContainers;
+                System.out.println("[Breached] Restocked " + restockedContainers
+                        + " portal structure containers for " + target.placementKey() + ".");
+            }
+        }
+
+        if (totalRestockedContainers <= 0) {
+            return PortalRestockResult.NONE;
+        }
+
+        if (lootConfig.announceRestocks) {
+            world.getServer().getPlayerManager().broadcast(
+                    getMajorRestockAnnouncement(PORTAL_STRUCTURE_KEY),
+                    false
+            );
+        }
+
+        return new PortalRestockResult(restockedStructures, totalRestockedContainers, true);
+    }
+
+    private static List<PortalRestockTarget> getPortalRestockTargets(
+            ServerWorld world,
+            BreachedStructurePlacementState state
+    ) {
+        List<PortalRestockTarget> portalTargets = new ArrayList<>();
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> entry : new ArrayList<>(state.placements())) {
+            if (!isPortalPlacement(entry.getKey())) {
+                continue;
+            }
+
+            Optional<BreachedStructureDefinition> definition = getMajorDefinition(entry.getKey())
+                    .map(baseDefinition -> getActiveDefinition(world, baseDefinition));
+            if (definition.isEmpty() || !world.getRegistryKey().equals(definition.get().requiredDimension())) {
+                continue;
+            }
+
+            portalTargets.add(new PortalRestockTarget(entry.getKey(), definition.get(), entry.getValue()));
+        }
+
+        return portalTargets;
+    }
+
+    private static long syncPortalRestockTimes(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            List<PortalRestockTarget> portalTargets
+    ) {
+        long sharedRestockTime = Long.MAX_VALUE;
+        for (PortalRestockTarget target : portalTargets) {
+            BreachedStructurePlacementState.SavedPlacement placement = target.placement();
+            if (placement.nextRestockTime() > placement.lastRestockTime()) {
+                sharedRestockTime = Math.min(sharedRestockTime, placement.nextRestockTime());
+            }
+        }
+
+        if (sharedRestockTime == Long.MAX_VALUE) {
+            sharedRestockTime = createNextPortalLootRestockTime(world, getLatestPortalLastRestockTime(portalTargets));
+        }
+        long latestLastRestockTime = getLatestPortalLastRestockTime(portalTargets);
+        long earliestAllowedRestockTime = latestLastRestockTime + PORTAL_MIN_RESTOCK_INTERVAL_TICKS;
+        long latestAllowedRestockTime = latestLastRestockTime + PORTAL_MAX_RESTOCK_INTERVAL_TICKS;
+        sharedRestockTime = Math.max(earliestAllowedRestockTime, Math.min(sharedRestockTime, latestAllowedRestockTime));
+
+        for (PortalRestockTarget target : portalTargets) {
+            BreachedStructurePlacementState.SavedPlacement placement = target.placement();
+            if (placement.nextRestockTime() <= placement.lastRestockTime()
+                    || placement.nextRestockTime() != sharedRestockTime) {
+                state.markLootRestocked(target.placementKey(), placement.lastRestockTime(), sharedRestockTime);
+            }
+        }
+
+        return sharedRestockTime;
+    }
+
+    private static long getLatestPortalLastRestockTime(List<PortalRestockTarget> portalTargets) {
+        long latestLastRestockTime = 0L;
+        for (PortalRestockTarget target : portalTargets) {
+            latestLastRestockTime = Math.max(latestLastRestockTime, target.placement().lastRestockTime());
+        }
+
+        return latestLastRestockTime;
+    }
+
+    private static void tickPortalEvent(ServerWorld world, BreachedStructurePlacementState state) {
+        long eventEndTime = state.getPortalEventEndTime();
+        if (eventEndTime <= 0L || world.getTime() % PORTAL_EVENT_TICK_INTERVAL != 0) {
+            return;
+        }
+
+        long remainingTicks = eventEndTime - world.getTime();
+        if (remainingTicks <= 0L) {
+            closePortalEvent(world, state);
+            return;
+        }
+
+        for (int warningSeconds : PORTAL_EVENT_WARNING_SECONDS) {
+            if (remainingTicks <= warningSeconds * 20L
+                    && state.markPortalEventWarningSent(warningSeconds)) {
+                broadcastPortalEventMessage(world, getPortalWarningMessage(warningSeconds));
+            }
+        }
+    }
+
+    private static void startPortalEvent(ServerWorld world, BreachedStructurePlacementState state) {
+        long eventEndTime = world.getTime() + PORTAL_EVENT_DURATION_TICKS;
+        state.startPortalEvent(eventEndTime);
+        int litBlocks = lightOfficialPortalStructures(world, state);
+        broadcastPortalEventMessage(world, Text.literal("The Nether portals have been lit. The Nether is open for 1 hour.").formatted(Formatting.DARK_PURPLE));
+        System.out.println("[Breached] Portal event opened until world time " + eventEndTime
+                + "; lit " + litBlocks + " official portal blocks.");
+    }
+
+    private static void closePortalEvent(ServerWorld world, BreachedStructurePlacementState state) {
+        int removedPortalBlocks = closeOfficialPortalStructures(world, state);
+        int killedPlayers = killNetherPlayers(world);
+        state.clearPortalEvent();
+        broadcastPortalEventMessage(world, Text.literal("The Nether has closed. The portal lights have gone out.").formatted(Formatting.DARK_PURPLE));
+        System.out.println("[Breached] Portal event closed; removed " + removedPortalBlocks
+                + " official portal blocks and killed " + killedPlayers + " Nether players.");
+    }
+
+    private static Text getPortalWarningMessage(int secondsRemaining) {
+        if (secondsRemaining >= 60) {
+            int minutesRemaining = secondsRemaining / 60;
+            String minuteLabel = minutesRemaining == 1 ? "minute" : "minutes";
+            return Text.literal("The Nether closes in " + minutesRemaining + " " + minuteLabel + ".")
+                    .formatted(Formatting.DARK_PURPLE);
+        }
+
+        String secondLabel = secondsRemaining == 1 ? "second" : "seconds";
+        return Text.literal("The Nether closes in " + secondsRemaining + " " + secondLabel + ".")
+                .formatted(Formatting.DARK_PURPLE);
+    }
+
+    private static void broadcastPortalEventMessage(ServerWorld world, Text message) {
+        MinecraftServer server = world.getServer();
+        if (server != null) {
+            server.getPlayerManager().broadcast(message, false);
+        }
+    }
+
+    private static int lightOfficialPortalStructures(ServerWorld world, BreachedStructurePlacementState state) {
+        int litBlocks = 0;
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> entry : new ArrayList<>(state.placements())) {
+            if (!isPortalPlacement(entry.getKey()) || !entry.getValue().active() || !hasPlacementFootprint(entry.getValue())) {
+                continue;
+            }
+
+            Optional<BreachedStructureDefinition> definition = getActiveDefinition(world, structureKey(entry.getKey()));
+            if (definition.isEmpty()) {
+                continue;
+            }
+
+            litBlocks += lightOfficialPortalStructure(world, definition.get(), entry.getValue());
+        }
+
+        return litBlocks;
+    }
+
+    private static int lightOfficialPortalStructure(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement
+    ) {
+        loadPlacementFootprintChunks(world, placement);
+        Set<BlockPos> litBlocks = new HashSet<>();
+        lightTemplatePortalBlocks(world, definition, placement, litBlocks);
+        int maxX = placement.originX() + placement.sizeX();
+        int maxY = Math.min(world.getTopYInclusive() + 1, placement.originY() + placement.sizeY());
+        int maxZ = placement.originZ() + placement.sizeZ();
+
+        for (int x = placement.originX(); x < maxX; x++) {
+            for (int y = Math.max(world.getBottomY(), placement.originY()); y < maxY; y++) {
+                for (int z = placement.originZ(); z < maxZ; z++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    tryLightPortalFrame(world, pos, Direction.Axis.X, litBlocks);
+                    tryLightPortalFrame(world, pos, Direction.Axis.Z, litBlocks);
+                }
+            }
+        }
+
+        return litBlocks.size();
+    }
+
+    private static void lightTemplatePortalBlocks(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            Set<BlockPos> litBlocks
+    ) {
+        Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, definition);
+        if (template.isEmpty()) {
+            return;
+        }
+
+        BlockPos origin = new BlockPos(placement.originX(), placement.originY(), placement.originZ());
+        for (BreachedStructureSpawnManager.TemplatePlacedBlock block : BreachedStructureSpawnManager.getTemplatePlacedBlocks(
+                world,
+                definition,
+                template.get(),
+                origin,
+                definition.mirror(),
+                definition.rotation()
+        )) {
+            if (!block.state().isOf(Blocks.NETHER_PORTAL)) {
+                continue;
+            }
+
+            if (litBlocks.add(block.pos())) {
+                world.setBlockState(block.pos(), block.state(), Block.NOTIFY_LISTENERS);
+            }
+        }
+    }
+
+    private static void tryLightPortalFrame(
+            ServerWorld world,
+            BlockPos bottomLeftInterior,
+            Direction.Axis axis,
+            Set<BlockPos> litBlocks
+    ) {
+        for (int width = 2; width <= MAX_PORTAL_FRAME_INTERIOR_WIDTH; width++) {
+            for (int height = 3; height <= MAX_PORTAL_FRAME_INTERIOR_HEIGHT; height++) {
+                if (!isValidPortalFrame(world, bottomLeftInterior, axis, width, height)) {
+                    continue;
+                }
+
+                Direction widthDirection = getPortalWidthDirection(axis);
+                BlockState portalState = Blocks.NETHER_PORTAL.getDefaultState().with(NetherPortalBlock.AXIS, axis);
+                for (int widthOffset = 0; widthOffset < width; widthOffset++) {
+                    for (int yOffset = 0; yOffset < height; yOffset++) {
+                        BlockPos portalPos = bottomLeftInterior.offset(widthDirection, widthOffset).up(yOffset);
+                        if (litBlocks.add(portalPos)) {
+                            world.setBlockState(portalPos, portalState, Block.NOTIFY_LISTENERS);
+                        }
+                    }
+                }
+
+                return;
+            }
+        }
+    }
+
+    private static boolean isValidPortalFrame(
+            ServerWorld world,
+            BlockPos bottomLeftInterior,
+            Direction.Axis axis,
+            int width,
+            int height
+    ) {
+        Direction widthDirection = getPortalWidthDirection(axis);
+        for (int yOffset = -1; yOffset <= height; yOffset++) {
+            if (!isPortalFrameBlock(world.getBlockState(bottomLeftInterior.offset(widthDirection, -1).up(yOffset)))
+                    || !isPortalFrameBlock(world.getBlockState(bottomLeftInterior.offset(widthDirection, width).up(yOffset)))) {
+                return false;
+            }
+        }
+
+        for (int widthOffset = 0; widthOffset < width; widthOffset++) {
+            if (!isPortalFrameBlock(world.getBlockState(bottomLeftInterior.offset(widthDirection, widthOffset).down()))
+                    || !isPortalFrameBlock(world.getBlockState(bottomLeftInterior.offset(widthDirection, widthOffset).up(height)))) {
+                return false;
+            }
+
+            for (int yOffset = 0; yOffset < height; yOffset++) {
+                if (!canReplaceWithPortalBlock(world, bottomLeftInterior.offset(widthDirection, widthOffset).up(yOffset))) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean isPortalFrameBlock(BlockState state) {
+        return state.isOf(Blocks.OBSIDIAN)
+                || state.isOf(Blocks.CRYING_OBSIDIAN);
+    }
+
+    private static boolean canReplaceWithPortalBlock(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (world.getBlockEntity(pos) != null || isPortalFrameBlock(state)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static Direction getPortalWidthDirection(Direction.Axis axis) {
+        return axis == Direction.Axis.X ? Direction.EAST : Direction.SOUTH;
+    }
+
+    private static int closeOfficialPortalStructures(ServerWorld world, BreachedStructurePlacementState state) {
+        int removedBlocks = 0;
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> entry : new ArrayList<>(state.placements())) {
+            if (!isPortalPlacement(entry.getKey()) || !entry.getValue().active() || !hasPlacementFootprint(entry.getValue())) {
+                continue;
+            }
+
+            removedBlocks += removeOfficialPortalBlocks(world, entry.getValue());
+        }
+
+        return removedBlocks;
+    }
+
+    private static int removeOfficialPortalBlocks(
+            ServerWorld world,
+            BreachedStructurePlacementState.SavedPlacement placement
+    ) {
+        loadPlacementFootprintChunks(world, placement);
+        int removedBlocks = 0;
+        int maxX = placement.originX() + placement.sizeX();
+        int maxY = Math.min(world.getTopYInclusive() + 1, placement.originY() + placement.sizeY());
+        int maxZ = placement.originZ() + placement.sizeZ();
+
+        for (int x = placement.originX(); x < maxX; x++) {
+            for (int y = Math.max(world.getBottomY(), placement.originY()); y < maxY; y++) {
+                for (int z = placement.originZ(); z < maxZ; z++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    if (world.getBlockState(pos).isOf(Blocks.NETHER_PORTAL)) {
+                        removeBlockWithoutDrops(world, pos);
+                        removedBlocks++;
+                    }
+                }
+            }
+        }
+
+        return removedBlocks;
+    }
+
+    private static int killNetherPlayers(ServerWorld overworld) {
+        MinecraftServer server = overworld.getServer();
+        if (server == null) {
+            return 0;
+        }
+
+        ServerWorld netherWorld = server.getWorld(World.NETHER);
+        if (netherWorld == null) {
+            return 0;
+        }
+
+        int killedPlayers = 0;
+        for (ServerPlayerEntity player : new ArrayList<>(netherWorld.getPlayers())) {
+            player.kill(netherWorld);
+            killedPlayers++;
+        }
+
+        return killedPlayers;
+    }
+
+    private static boolean hasPlacementFootprint(BreachedStructurePlacementState.SavedPlacement placement) {
+        return placement.sizeX() > 0 && placement.sizeY() > 0 && placement.sizeZ() > 0;
+    }
+
+    private static void loadPlacementFootprintChunks(
+            ServerWorld world,
+            BreachedStructurePlacementState.SavedPlacement placement
+    ) {
+        int maxX = placement.originX() + Math.max(1, placement.sizeX()) - 1;
+        int maxZ = placement.originZ() + Math.max(1, placement.sizeZ()) - 1;
+        int minChunkX = Math.floorDiv(placement.originX(), CHUNK_SIZE);
+        int maxChunkX = Math.floorDiv(maxX, CHUNK_SIZE);
+        int minChunkZ = Math.floorDiv(placement.originZ(), CHUNK_SIZE);
+        int maxChunkZ = Math.floorDiv(maxZ, CHUNK_SIZE);
+
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                world.getChunk(chunkX, chunkZ);
+            }
+        }
+    }
+
+    private static boolean isPortalStructure(BreachedStructureDefinition definition) {
+        return BreachedStructureDefinitions.key(definition).equals(PORTAL_STRUCTURE_KEY);
+    }
+
+    private static boolean isPortalPlacement(String placementKey) {
+        return isPlacementForStructure(placementKey, PORTAL_STRUCTURE_KEY);
     }
 
     private static Text getMajorRestockAnnouncement(String placementKey) {
@@ -1871,7 +2545,7 @@ public final class BreachedStructurePlacementManager {
             return Text.literal("Horace has been restocked").formatted(Formatting.RED);
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.OFFICIAL_NETHER_PORTAL))) {
-            return Text.literal("A portal has been restocked").formatted(Formatting.DARK_PURPLE);
+            return Text.literal("The Nether portal structures have been restocked.").formatted(Formatting.DARK_PURPLE);
         }
 
         return Text.literal("Major structure loot has been restocked");
@@ -1905,7 +2579,7 @@ public final class BreachedStructurePlacementManager {
         );
         long nextRestockTime = placement.nextRestockTime() > placement.lastRestockTime()
                 ? placement.nextRestockTime()
-                : createNextMajorLootRestockTime(world, placementKey);
+                : createNextLootRestockTime(world, placementKey);
         state.setLootContainers(placementKey, lootContainers, placement.lastRestockTime(), nextRestockTime);
         diagnostics.majorLootBackfillsCompleted++;
         diagnostics.majorLootContainersTracked += lootContainers.size();
@@ -2128,18 +2802,56 @@ public final class BreachedStructurePlacementManager {
 
     private static long createNextMajorLootRestockTime(ServerWorld world, String placementKey) {
         BreachedConfig.MajorStructureLootSettings lootConfig = BreachedConfig.get().majorStructureLoot;
-        int intervalRange = lootConfig.maxRestockIntervalTicks - lootConfig.minRestockIntervalTicks;
+        return createNextLootRestockTime(
+                world,
+                placementKey,
+                world.getTime(),
+                lootConfig.minRestockIntervalTicks,
+                lootConfig.maxRestockIntervalTicks
+        );
+    }
+
+    private static long createNextLootRestockTime(ServerWorld world, String placementKey) {
+        if (isPortalPlacement(placementKey)) {
+            return createNextPortalLootRestockTime(world);
+        }
+
+        return createNextMajorLootRestockTime(world, placementKey);
+    }
+
+    private static long createNextPortalLootRestockTime(ServerWorld world) {
+        return createNextPortalLootRestockTime(world, world.getTime());
+    }
+
+    private static long createNextPortalLootRestockTime(ServerWorld world, long baseTime) {
+        return createNextLootRestockTime(
+                world,
+                PORTAL_STRUCTURE_KEY,
+                baseTime,
+                PORTAL_MIN_RESTOCK_INTERVAL_TICKS,
+                PORTAL_MAX_RESTOCK_INTERVAL_TICKS
+        );
+    }
+
+    private static long createNextLootRestockTime(
+            ServerWorld world,
+            String restockKey,
+            long baseTime,
+            int minIntervalTicks,
+            int maxIntervalTicks
+    ) {
+        int intervalRange = maxIntervalTicks - minIntervalTicks;
         java.util.Random random = new java.util.Random(
                 world.getSeed()
-                        ^ (world.getTime() * 0x9E3779B97F4A7C15L)
-                        ^ ((long) placementKey.hashCode() * 0xBF58476D1CE4E5B9L)
+                        ^ (baseTime * 0x9E3779B97F4A7C15L)
+                        ^ ((long) restockKey.hashCode() * 0xBF58476D1CE4E5B9L)
         );
-        int interval = lootConfig.minRestockIntervalTicks;
+        int interval = minIntervalTicks;
         if (intervalRange > 0) {
             interval += random.nextInt(intervalRange + 1);
         }
 
-        return world.getTime() + interval;
+        return baseTime + interval;
     }
 
     private static int countPlacedMinorPois(BreachedStructurePlacementState state) {
@@ -2389,7 +3101,8 @@ public final class BreachedStructurePlacementManager {
             Vec3i footprintSize,
             BreachedStructureSite site
     ) {
-        if (definition.maxVegetationObstruction() <= 0 && definition.maxSolidObstruction() <= 0) {
+        int maxVegetationObstruction = getMaxVegetationObstruction(definition);
+        if (maxVegetationObstruction <= 0 && definition.maxSolidObstruction() <= 0) {
             return new ObstructionEvaluation(true, 0.0D, null);
         }
 
@@ -2414,10 +3127,10 @@ public final class BreachedStructurePlacementManager {
             }
         }
 
-        if (definition.maxVegetationObstruction() >= 0 && vegetationBlocks > definition.maxVegetationObstruction()) {
+        if (maxVegetationObstruction >= 0 && vegetationBlocks > maxVegetationObstruction) {
             return new ObstructionEvaluation(false, Double.MAX_VALUE,
                     "too much vegetation obstruction: " + vegetationBlocks
-                            + " blocks, max " + definition.maxVegetationObstruction());
+                            + " blocks, max " + maxVegetationObstruction);
         }
 
         if (definition.maxSolidObstruction() >= 0 && solidBlocks > definition.maxSolidObstruction()) {
@@ -2429,14 +3142,41 @@ public final class BreachedStructurePlacementManager {
         return new ObstructionEvaluation(true, vegetationBlocks + (solidBlocks * 4.0D), null);
     }
 
+    private static int getMaxVegetationObstruction(BreachedStructureDefinition definition) {
+        if (isForestTolerantMinorPoi(definition)) {
+            return Math.max(definition.maxVegetationObstruction(), MINOR_FOREST_VEGETATION_OBSTRUCTION_LIMIT);
+        }
+
+        return definition.maxVegetationObstruction();
+    }
+
+    private static boolean isForestTolerantMinorPoi(BreachedStructureDefinition definition) {
+        return BreachedStructureDefinitions.isForestTolerantGroundMinorPoi(definition);
+    }
+
     private static boolean isVegetation(BlockState state) {
         return state.getBlock() instanceof LeavesBlock
-                || state.getBlock() instanceof PillarBlock
+                || state.isIn(BlockTags.LOGS)
                 || state.isOf(Blocks.TALL_GRASS)
                 || state.isOf(Blocks.FERN)
                 || state.isOf(Blocks.LARGE_FERN)
                 || state.isOf(Blocks.VINE)
                 || state.isOf(Blocks.SHORT_GRASS);
+    }
+
+    private static boolean isMinorPoiClearanceBlock(BlockState state) {
+        return isNaturalSurfaceObstruction(state) || isVegetation(state);
+    }
+
+    private static boolean shouldSnapshotMinorPoiClearanceBlock(
+            BreachedStructureDefinition definition,
+            BlockState state
+    ) {
+        if (definition.canClearBlocks()) {
+            return isMinorPoiClearanceBlock(state);
+        }
+
+        return isForestTolerantMinorPoi(definition) && isVegetation(state);
     }
 
     private static boolean isNaturalSurfaceObstruction(BlockState state) {
@@ -2521,7 +3261,7 @@ public final class BreachedStructurePlacementManager {
                 return ActionResult.PASS;
             }
 
-            if (!isInsideProtectedStructure(world, placementContext.getBlockPos())) {
+            if (!isInsideProtectedStructureBuildArea(world, placementContext.getBlockPos())) {
                 return ActionResult.PASS;
             }
 
@@ -2544,6 +3284,13 @@ public final class BreachedStructurePlacementManager {
                 continue;
             }
 
+            if (isExactProtectedStructure(definition.get())) {
+                if (isInsideExactProtectedStructure(serverWorld, definition.get(), placement.getValue(), pos)) {
+                    return true;
+                }
+                continue;
+            }
+
             if (BreachedStructureSpawnManager.isInsideProtectionRadius(
                     definition.get(),
                     placement.getValue().centerX(),
@@ -2555,6 +3302,111 @@ public final class BreachedStructurePlacementManager {
         }
 
         return false;
+    }
+
+    private static boolean isInsideProtectedStructureBuildArea(World world, BlockPos pos) {
+        if (world.isClient() || !world.getRegistryKey().equals(World.OVERWORLD) || !(world instanceof ServerWorld serverWorld)) {
+            return false;
+        }
+
+        BreachedStructurePlacementState state = BreachedStructurePlacementState.get(serverWorld.getServer());
+        migrateLegacyCentralSpawnState(serverWorld, state);
+
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
+            Optional<BreachedStructureDefinition> definition = getProtectedDefinition(placement.getKey());
+            if (definition.isEmpty()) {
+                continue;
+            }
+
+            if (isExactProtectedStructure(definition.get())) {
+                if (isInsidePlacementBounds(placement.getValue(), pos)) {
+                    return true;
+                }
+                continue;
+            }
+
+            if (BreachedStructureSpawnManager.isInsideProtectionRadius(
+                    definition.get(),
+                    placement.getValue().centerX(),
+                    placement.getValue().centerZ(),
+                    pos
+            )) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static boolean isExactProtectedStructure(BreachedStructureDefinition definition) {
+        return BreachedStructureDefinitions.key(definition).equals(EYEBALL_STRUCTURE_KEY);
+    }
+
+    private static boolean isInsideExactProtectedStructure(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        if (!isInsidePlacementBounds(placement, pos)) {
+            return false;
+        }
+
+        Set<BlockPos> protectedBlocks = getExactProtectionBlocks(world, definition);
+        BlockPos relativePos = new BlockPos(
+                pos.getX() - placement.originX(),
+                pos.getY() - placement.originY(),
+                pos.getZ() - placement.originZ()
+        );
+        return protectedBlocks.contains(relativePos);
+    }
+
+    private static boolean isInsidePlacementBounds(
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        if (placement.sizeX() <= 0 || placement.sizeY() <= 0 || placement.sizeZ() <= 0) {
+            return false;
+        }
+
+        return pos.getX() >= placement.originX()
+                && pos.getX() < placement.originX() + placement.sizeX()
+                && pos.getY() >= placement.originY()
+                && pos.getY() < placement.originY() + placement.sizeY()
+                && pos.getZ() >= placement.originZ()
+                && pos.getZ() < placement.originZ() + placement.sizeZ();
+    }
+
+    private static Set<BlockPos> getExactProtectionBlocks(ServerWorld world, BreachedStructureDefinition definition) {
+        String structureKey = BreachedStructureDefinitions.key(definition);
+        Set<BlockPos> cachedBlocks = EXACT_PROTECTION_BLOCKS.get(structureKey);
+        if (cachedBlocks != null) {
+            return cachedBlocks;
+        }
+
+        Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, definition);
+        if (template.isEmpty()) {
+            EXACT_PROTECTION_BLOCKS.put(structureKey, Set.of());
+            return Set.of();
+        }
+
+        Set<BlockPos> protectedBlocks = new HashSet<>();
+        for (BreachedStructureSpawnManager.TemplatePlacedBlock block : BreachedStructureSpawnManager.getTemplatePlacedBlocks(
+                world,
+                definition,
+                template.get(),
+                BlockPos.ORIGIN,
+                definition.mirror(),
+                definition.rotation()
+        )) {
+            if (!block.state().isAir()) {
+                protectedBlocks.add(block.pos().toImmutable());
+            }
+        }
+
+        Set<BlockPos> immutableBlocks = Set.copyOf(protectedBlocks);
+        EXACT_PROTECTION_BLOCKS.put(structureKey, immutableBlocks);
+        return immutableBlocks;
     }
 
     private static Optional<BreachedStructureDefinition> getProtectedDefinition(String key) {
@@ -2731,6 +3583,21 @@ public final class BreachedStructurePlacementManager {
                 0,
                 Double.MAX_VALUE
         );
+    }
+
+    private record PortalRestockTarget(
+            String placementKey,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement
+    ) {
+    }
+
+    private record PortalRestockResult(
+            int restockedStructures,
+            int restockedContainers,
+            boolean portalRestocked
+    ) {
+        private static final PortalRestockResult NONE = new PortalRestockResult(0, 0, false);
     }
 
     private record MinorPoiBlockEvaluation(

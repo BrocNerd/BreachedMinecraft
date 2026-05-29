@@ -8,9 +8,9 @@ import java.util.Locale;
 import java.util.Optional;
 
 public enum ReinforcementTier {
-    WOOD(0, "Wood", 15, 64),
-    IRON(1, "Iron", 127, 4),
-    DIAMOND(2, "Diamond", 255, 2);
+    WOOD(0, "Wood", 16, 64),
+    IRON(1, "Iron", 64, 4),
+    DIAMOND(2, "Diamond", 256, 2);
 
     private final int level;
     private final String displayName;
