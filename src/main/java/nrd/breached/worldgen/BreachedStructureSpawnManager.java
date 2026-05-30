@@ -181,18 +181,23 @@ public final class BreachedStructureSpawnManager {
         return placement.origin().getX() + placement.size().getX() / 2;
     }
 
+    public static int getProtectedCenterY(BreachedStructurePlacement placement) {
+        return placement.origin().getY() + placement.size().getY() / 2;
+    }
+
     public static int getProtectedCenterZ(BreachedStructurePlacement placement) {
         return placement.origin().getZ() + placement.size().getZ() / 2;
     }
 
-    public static boolean isInsideProtectionRadius(BreachedStructureDefinition definition, int centerX, int centerZ, BlockPos pos) {
+    public static boolean isInsideProtectionRadius(BreachedStructureDefinition definition, int centerX, int centerY, int centerZ, BlockPos pos) {
         if (!definition.protectedStructure() || definition.protectionRadius() <= 0) {
             return false;
         }
 
         long xDistance = pos.getX() - centerX;
+        long yDistance = pos.getY() - centerY;
         long zDistance = pos.getZ() - centerZ;
-        return xDistance * xDistance + zDistance * zDistance <= definition.protectionRadiusSquared();
+        return xDistance * xDistance + yDistance * yDistance + zDistance * zDistance <= definition.protectionRadiusSquared();
     }
 
     public static BreachedStructureSite evaluateSite(
@@ -240,6 +245,7 @@ public final class BreachedStructureSpawnManager {
         int surfaceY = switch (definition.heightSelection()) {
             case ORIGIN_SURFACE -> getSurfaceY(world, definition, originX, originZ);
             case MEDIAN_SURFACE -> getMedianSurfaceY(surfaceHeights);
+            case HIGHEST_SURFACE -> maxY;
         };
 
         return new BreachedStructureSite(originX, originZ, surfaceY, minY, maxY, heightRange, score, null);

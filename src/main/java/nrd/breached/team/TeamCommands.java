@@ -6,13 +6,17 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import net.minecraft.command.CommandRegistryAccess;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.minecraft.command.CommandSource;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -21,6 +25,10 @@ import static net.minecraft.server.command.CommandManager.literal;
 
 public final class TeamCommands {
     private static final int MAX_TEAM_NAME_LENGTH = 24;
+    private static final List<String> TEAM_COLOR_NAMES = Arrays.stream(Formatting.values())
+            .filter(Formatting::isColor)
+            .map(Formatting::getName)
+            .toList();
 
     private TeamCommands() {
     }
@@ -46,6 +54,10 @@ public final class TeamCommands {
                         .then(literal("transfer")
                                 .then(argument("player", EntityArgumentType.player())
                                         .executes(TeamCommands::transferOwnership)))
+                        .then(literal("color")
+                                .then(argument("color", StringArgumentType.word())
+                                        .suggests((context, builder) -> CommandSource.suggestMatching(TEAM_COLOR_NAMES, builder))
+                                        .executes(TeamCommands::setTeamColor)))
                         .then(literal("join")
                                 .then(argument("name", StringArgumentType.word())
                                         .executes(TeamCommands::joinTeam)))
@@ -80,6 +92,7 @@ public final class TeamCommands {
         }
 
         TeamData team = state.createTeam(teamName, player.getUuid(), player.getGameProfile().name());
+        TeamLocatorBar.refresh(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Created team " + team.getName() + "."), false);
         return 1;
     }
@@ -101,6 +114,7 @@ public final class TeamCommands {
 
         String teamName = team.getName();
         state.disbandTeam(team);
+        TeamLocatorBar.refresh(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Disbanded team " + teamName + "."), false);
         return 1;
     }
@@ -166,6 +180,7 @@ public final class TeamCommands {
         }
 
         state.removeMember(team, kickedPlayerId);
+        TeamLocatorBar.refresh(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Kicked " + kickedPlayer.getGameProfile().name() + " from " + team.getName() + "."), false);
         kickedPlayer.sendMessage(Text.literal("You were kicked from " + team.getName() + "."));
         return 1;
@@ -204,6 +219,35 @@ public final class TeamCommands {
         return 1;
     }
 
+    private static int setTeamColor(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
+        ServerPlayerEntity owner = context.getSource().getPlayerOrThrow();
+        TeamState state = TeamState.get(context.getSource().getServer());
+        TeamData team = state.getPlayerTeam(owner.getUuid()).orElse(null);
+
+        if (team == null) {
+            context.getSource().sendError(Text.literal("You are not in a team."));
+            return 0;
+        }
+
+        if (!team.isOwner(owner.getUuid())) {
+            context.getSource().sendError(Text.literal("Only the team owner can change the team color."));
+            return 0;
+        }
+
+        String colorName = StringArgumentType.getString(context, "color");
+        Formatting color = Formatting.byName(colorName);
+        if (color == null || !color.isColor()) {
+            context.getSource().sendError(Text.literal("Unknown team color. Use: " + String.join(", ", TEAM_COLOR_NAMES) + "."));
+            return 0;
+        }
+
+        state.setDisplayColor(team, color);
+        context.getSource().sendFeedback(() -> Text.literal("Set team color to ")
+                .append(Text.literal(color.getName()).formatted(color))
+                .append(Text.literal(".")), false);
+        return 1;
+    }
+
     private static int joinTeam(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
         ServerPlayerEntity player = context.getSource().getPlayerOrThrow();
         String teamName = StringArgumentType.getString(context, "name");
@@ -226,6 +270,7 @@ public final class TeamCommands {
         }
 
         state.addMember(team, player.getUuid(), player.getGameProfile().name());
+        TeamLocatorBar.refresh(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Joined team " + team.getName() + "."), false);
         return 1;
     }
@@ -246,6 +291,7 @@ public final class TeamCommands {
         }
 
         state.removeMember(team, player.getUuid());
+        TeamLocatorBar.refresh(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Left team " + team.getName() + "."), false);
         return 1;
     }
@@ -263,7 +309,9 @@ public final class TeamCommands {
         String members = team.getMembers().values().stream()
                 .sorted(Comparator.naturalOrder())
                 .collect(Collectors.joining(", "));
-        context.getSource().sendFeedback(() -> Text.literal("Team " + team.getName() + " | Owner: " + team.getOwnerName() + " | Members: " + members), false);
+        context.getSource().sendFeedback(() -> Text.literal("Team ")
+                .append(Text.literal(team.getName()).formatted(team.getDisplayColor()))
+                .append(Text.literal(" | Color: " + team.getDisplayColor().getName() + " | Owner: " + team.getOwnerName() + " | Members: " + members)), false);
         return 1;
     }
 
@@ -279,7 +327,9 @@ public final class TeamCommands {
         state.getTeams().stream()
                 .sorted(Comparator.comparing(TeamData::getName, String.CASE_INSENSITIVE_ORDER))
                 .forEach(team -> context.getSource().sendFeedback(
-                        () -> Text.literal(team.getName() + " - " + team.getMembers().size() + " " + memberCountLabel(team.getMembers().size())),
+                        () -> Text.literal("")
+                                .append(Text.literal(team.getName()).formatted(team.getDisplayColor()))
+                                .append(Text.literal(" - " + team.getMembers().size() + " " + memberCountLabel(team.getMembers().size()))),
                         false
                 ));
         return state.getTeams().size();

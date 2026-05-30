@@ -28,7 +28,7 @@ public final class BreachedStructureDefinitions {
             1200,
             false,
             0x7C31B0E5A91D4F22L,
-            72,
+            48,
             500,
             200,
             true,
@@ -57,6 +57,54 @@ public final class BreachedStructureDefinitions {
             Blocks.DEEPSLATE_BRICKS,
             Blocks.REINFORCED_DEEPSLATE,
             96,
+            BreachedStructureDefinition.PrePlacementCheck.NONE
+    );
+
+    public static final BreachedStructureDefinition TOWNHALL = new BreachedStructureDefinition(
+            "townhall.nbt",
+            Identifier.of(Breached.MOD_ID, "townhall"),
+            World.OVERWORLD,
+            1,
+            1,
+            BreachedStructureDefinition.PlacementMode.CENTER_RADIUS,
+            0,
+            0,
+            0,
+            4,
+            0,
+            0,
+            0,
+            false,
+            0x2F5B81A37C44D109L,
+            48,
+            300,
+            150,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+            true,
+            false,
+            40,
+            BreachedStructureDefinition.SpawnImportance.REQUIRED,
+            BreachedStructureDefinition.SpacingGroup.MAJOR,
+            BreachedStructureDefinition.SpacingPolicy.MAJOR_ONLY,
+            0,
+            0,
+            BreachedStructureDefinition.AirPlacementMode.IGNORE_AIR,
+            BreachedStructureDefinition.TerrainValidation.LENIENT,
+            BreachedStructureDefinition.HeightSelection.HIGHEST_SURFACE,
+            8,
+            BlockMirror.NONE,
+            BlockRotation.NONE,
+            BreachedStructureDefinition.SurfaceRequirement.ALLOW_WATER,
+            BreachedStructureDefinition.SupportMode.WATER_MARKER_PILLARS,
+            Blocks.QUARTZ_PILLAR,
+            Blocks.REINFORCED_DEEPSLATE,
+            384,
             BreachedStructureDefinition.PrePlacementCheck.NONE
     );
 
@@ -124,7 +172,7 @@ public final class BreachedStructureDefinitions {
             900,
             false,
             0x19E6C4D8A73B52F1L,
-            0,
+            24,
             400,
             150,
             true,
@@ -134,7 +182,7 @@ public final class BreachedStructureDefinitions {
             false,
             true,
             false,
-            false,
+            true,
             false,
             10,
             BreachedStructureDefinition.SpawnImportance.REQUIRED,
@@ -172,7 +220,7 @@ public final class BreachedStructureDefinitions {
             1000,
             false,
             0x5B7F2D19C8A643E0L,
-            0,
+            48,
             400,
             150,
             true,
@@ -182,7 +230,7 @@ public final class BreachedStructureDefinitions {
             false,
             false,
             false,
-            false,
+            true,
             false,
             5,
             BreachedStructureDefinition.SpawnImportance.REQUIRED,
@@ -220,7 +268,7 @@ public final class BreachedStructureDefinitions {
             1100,
             false,
             0x31A64F7D92C50B18L,
-            48,
+            24,
             500,
             200,
             false,
@@ -877,6 +925,7 @@ public final class BreachedStructureDefinitions {
     );
 
     public static final List<BreachedStructureDefinition> PLANNED_STRUCTURES = List.of(
+            TOWNHALL,
             SWORD_STATUE,
             OFFICIAL_NETHER_PORTAL,
             HORACE,
@@ -913,6 +962,7 @@ public final class BreachedStructureDefinitions {
     );
 
     public static final List<BreachedStructureDefinition> ALL_STRUCTURES = List.of(
+            TOWNHALL,
             SWORD_STATUE,
             OFFICIAL_NETHER_PORTAL,
             HORACE,
@@ -934,8 +984,11 @@ public final class BreachedStructureDefinitions {
     );
 
     public static final List<BreachedStructureDefinition> PROTECTED_STRUCTURES = List.of(
+            TOWNHALL,
             SWORD_STATUE,
             OFFICIAL_NETHER_PORTAL,
+            HORACE,
+            PINK_TREE,
             BIG_BOAT,
             EYEBALL
     );

@@ -55,6 +55,7 @@ import nrd.breached.reinforcement.ReinforcementTier;
 import nrd.breached.respawn.RespawnCooldownManager;
 import nrd.breached.team.TeamCommands;
 import nrd.breached.worldgen.BreachedDimensionRules;
+import nrd.breached.worldgen.BreachedStructurePlacementManager;
 
 import java.util.HashMap;
 import java.util.Comparator;
@@ -453,6 +454,11 @@ public class Breached implements ModInitializer {
 
                 if (LandlockClaimManager.countPlayerLandlockAuthorizations(world, player.getUuid()) >= LandlockClaimManager.MAX_AUTHORIZED_LANDLOCKS) {
                     player.sendMessage(Text.literal("You are already authorized on the maximum number of Landlocks."), false);
+                    return ActionResult.FAIL;
+                }
+
+                if (BreachedStructurePlacementManager.isInsideEyeballLandlockExclusion(world, placementContext.getBlockPos())) {
+                    player.sendMessage(Text.literal("Landlock Blocks cannot be placed within 32 blocks of the Eyeball."), false);
                     return ActionResult.FAIL;
                 }
 

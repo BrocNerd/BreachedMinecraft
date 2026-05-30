@@ -6,6 +6,7 @@ import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtList;
 import net.minecraft.nbt.NbtString;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.util.Formatting;
 import net.minecraft.world.PersistentState;
 import net.minecraft.world.PersistentStateType;
 
@@ -93,6 +94,11 @@ public class TeamState extends PersistentState {
         markDirty();
     }
 
+    public void setDisplayColor(TeamData team, Formatting color) {
+        team.setDisplayColor(color);
+        markDirty();
+    }
+
     private NbtCompound toNbt() {
         NbtCompound root = new NbtCompound();
         NbtList teams = new NbtList();
@@ -103,6 +109,7 @@ public class TeamState extends PersistentState {
             teamNbt.putString("name", team.getName());
             teamNbt.putString("ownerId", team.getOwnerId().toString());
             teamNbt.putString("ownerName", team.getOwnerName());
+            teamNbt.putString("displayColor", team.getDisplayColor().getName());
 
             NbtList members = new NbtList();
             for (Map.Entry<UUID, String> member : team.getMembers().entrySet()) {
@@ -136,7 +143,8 @@ public class TeamState extends PersistentState {
             String name = teamNbt.getString("name", "");
             UUID ownerId = UUID.fromString(teamNbt.getString("ownerId", ""));
             String ownerName = teamNbt.getString("ownerName", "");
-            TeamData team = new TeamData(teamId, name, ownerId, ownerName);
+            Formatting displayColor = parseDisplayColor(teamNbt.getString("displayColor", ""));
+            TeamData team = new TeamData(teamId, name, ownerId, ownerName, displayColor);
             team.getMembers().clear();
 
             NbtList members = teamNbt.getListOrEmpty("members");
@@ -165,5 +173,14 @@ public class TeamState extends PersistentState {
 
     private static String normalizeName(String name) {
         return name.toLowerCase(Locale.ROOT);
+    }
+
+    private static Formatting parseDisplayColor(String value) {
+        Formatting color = Formatting.byName(value);
+        if (color == null || !color.isColor()) {
+            return TeamData.DEFAULT_DISPLAY_COLOR;
+        }
+
+        return color;
     }
 }

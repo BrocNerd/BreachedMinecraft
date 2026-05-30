@@ -11,7 +11,9 @@
     "FireChargeItemMixin",
     "FlintAndSteelItemMixin",
     "ItemStackMixin",
-    "ServerPlayerRespawnMixin"
+    "PlayerManagerMixin",
+    "ServerPlayerRespawnMixin",
+    "ServerWaypointHandlerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

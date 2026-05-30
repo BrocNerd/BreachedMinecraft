@@ -104,6 +104,7 @@ public final class CentralSpawnPoiManager {
         return BreachedStructureSpawnManager.isInsideProtectionRadius(
                 BreachedStructureSpawnManager.CENTRAL_SPAWN,
                 state.getCenterX(),
+                pos.getY(),
                 state.getCenterZ(),
                 pos
         );

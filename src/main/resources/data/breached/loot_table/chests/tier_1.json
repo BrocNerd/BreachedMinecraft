@@ -4,8 +4,8 @@
     {
       "rolls": {
         "type": "minecraft:uniform",
-        "min": 1.0,
-        "max": 2.0
+        "min": 1,
+        "max": 2
       },
       "entries": [
         {
@@ -17,8 +17,8 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 2.0,
-                "max": 6.0
+                "min": 2,
+                "max": 6
               }
             }
           ]
@@ -32,23 +32,8 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 4.0,
-                "max": 12.0
-              }
-            }
-          ]
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:coal",
-          "weight": 16,
-          "functions": [
-            {
-              "function": "minecraft:set_count",
-              "count": {
-                "type": "minecraft:uniform",
-                "min": 6.0,
-                "max": 16.0
+                "min": 4,
+                "max": 12
               }
             }
           ]
@@ -62,8 +47,8 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 1.0,
-                "max": 3.0
+                "min": 2,
+                "max": 4
               }
             }
           ]
@@ -77,8 +62,8 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 1.0,
-                "max": 2.0
+                "min": 1,
+                "max": 2
               }
             }
           ]
@@ -86,14 +71,14 @@
         {
           "type": "minecraft:item",
           "name": "minecraft:emerald",
-          "weight": 2,
+          "weight": 4,
           "functions": [
             {
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 1.0,
-                "max": 4.0
+                "min": 2,
+                "max": 4
               }
             }
           ]
@@ -103,8 +88,8 @@
     {
       "rolls": {
         "type": "minecraft:uniform",
-        "min": 0.0,
-        "max": 1.0
+        "min": 0,
+        "max": 1
       },
       "entries": [
         {
@@ -116,8 +101,8 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 3.0,
-                "max": 8.0
+                "min": 3,
+                "max": 8
               }
             }
           ]
@@ -131,8 +116,8 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 2.0,
-                "max": 5.0
+                "min": 2,
+                "max": 5
               }
             }
           ]
@@ -146,23 +131,23 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 3.0,
-                "max": 8.0
+                "min": 3,
+                "max": 8
               }
             }
           ]
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:apple",
+          "name": "minecraft:potato",
           "weight": 6,
           "functions": [
             {
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 2.0,
-                "max": 5.0
+                "min": 3,
+                "max": 8
               }
             }
           ]
@@ -176,8 +161,8 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 3.0,
-                "max": 8.0
+                "min": 3,
+                "max": 8
               }
             }
           ]
@@ -191,8 +176,8 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 1.0,
-                "max": 3.0
+                "min": 1,
+                "max": 3
               }
             }
           ]
@@ -202,129 +187,14 @@
     {
       "rolls": {
         "type": "minecraft:uniform",
-        "min": 1.0,
-        "max": 2.0
+        "min": 1,
+        "max": 2
       },
       "entries": [
         {
           "type": "minecraft:item",
-          "name": "minecraft:torch",
-          "weight": 12,
-          "functions": [
-            {
-              "function": "minecraft:set_count",
-              "count": {
-                "type": "minecraft:uniform",
-                "min": 8.0,
-                "max": 24.0
-              }
-            }
-          ]
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:oak_log",
-          "weight": 8,
-          "functions": [
-            {
-              "function": "minecraft:set_count",
-              "count": {
-                "type": "minecraft:uniform",
-                "min": 4.0,
-                "max": 12.0
-              }
-            }
-          ]
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:oak_planks",
-          "weight": 10,
-          "functions": [
-            {
-              "function": "minecraft:set_count",
-              "count": {
-                "type": "minecraft:uniform",
-                "min": 8.0,
-                "max": 24.0
-              }
-            }
-          ]
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:cobblestone",
-          "weight": 8,
-          "functions": [
-            {
-              "function": "minecraft:set_count",
-              "count": {
-                "type": "minecraft:uniform",
-                "min": 8.0,
-                "max": 24.0
-              }
-            }
-          ]
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:stone_bricks",
-          "weight": 6,
-          "functions": [
-            {
-              "function": "minecraft:set_count",
-              "count": {
-                "type": "minecraft:uniform",
-                "min": 8.0,
-                "max": 24.0
-              }
-            }
-          ]
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:dirt",
-          "weight": 6,
-          "functions": [
-            {
-              "function": "minecraft:set_count",
-              "count": {
-                "type": "minecraft:uniform",
-                "min": 8.0,
-                "max": 24.0
-              }
-            }
-          ]
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:ladder",
-          "weight": 5,
-          "functions": [
-            {
-              "function": "minecraft:set_count",
-              "count": {
-                "type": "minecraft:uniform",
-                "min": 4.0,
-                "max": 12.0
-              }
-            }
-          ]
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:iron_bars",
-          "weight": 4,
-          "functions": [
-            {
-              "function": "minecraft:set_count",
-              "count": {
-                "type": "minecraft:uniform",
-                "min": 2.0,
-                "max": 6.0
-              }
-            }
-          ]
+          "name": "minecraft:damaged_anvil",
+          "weight": 2
         },
         {
           "type": "minecraft:item",
@@ -335,8 +205,8 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 2.0,
-                "max": 8.0
+                "min": 2,
+                "max": 4
               }
             }
           ]
@@ -350,8 +220,8 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 2.0,
-                "max": 6.0
+                "min": 2,
+                "max": 4
               }
             }
           ]
@@ -361,21 +231,21 @@
     {
       "rolls": {
         "type": "minecraft:uniform",
-        "min": 0.0,
-        "max": 1.0
+        "min": 0,
+        "max": 1
       },
       "entries": [
         {
           "type": "minecraft:item",
           "name": "minecraft:arrow",
-          "weight": 14,
+          "weight": 10,
           "functions": [
             {
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 8.0,
-                "max": 24.0
+                "min": 8,
+                "max": 16
               }
             }
           ]
@@ -394,8 +264,8 @@
               "function": "minecraft:enchant_with_levels",
               "levels": {
                 "type": "minecraft:uniform",
-                "min": 5.0,
-                "max": 12.0
+                "min": 5,
+                "max": 12
               },
               "options": "#minecraft:on_random_loot"
             }
@@ -404,7 +274,7 @@
         {
           "type": "minecraft:item",
           "name": "minecraft:crossbow",
-          "weight": 1
+          "weight": 2
         },
         {
           "type": "minecraft:item",
@@ -416,61 +286,66 @@
     {
       "rolls": {
         "type": "minecraft:uniform",
-        "min": 0.0,
-        "max": 1.0
+        "min": 0,
+        "max": 1
       },
       "entries": [
         {
           "type": "minecraft:item",
           "name": "minecraft:stone_pickaxe",
-          "weight": 8
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:stone_axe",
-          "weight": 8
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:stone_shovel",
-          "weight": 6
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:stone_sword",
-          "weight": 6
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:iron_pickaxe",
-          "weight": 4
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:iron_axe",
-          "weight": 4
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:iron_shovel",
           "weight": 3
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_sword",
-          "weight": 4
+          "name": "minecraft:stone_axe",
+          "weight": 3
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_pickaxe",
+          "name": "minecraft:stone_shovel",
+          "weight": 3
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:stone_sword",
+          "weight": 3
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_pickaxe",
+          "weight": 2
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_axe",
+          "weight": 2
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_shovel",
+          "weight": 2
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_sword",
+          "weight": 2
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_spear",
+          "weight": 2
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_pickaxe",
           "weight": 1,
           "functions": [
             {
               "function": "minecraft:enchant_with_levels",
               "levels": {
                 "type": "minecraft:uniform",
-                "min": 5.0,
-                "max": 15.0
+                "min": 5,
+                "max": 15
               },
               "options": "#minecraft:on_random_loot"
             }
@@ -478,15 +353,15 @@
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_axe",
+          "name": "minecraft:copper_axe",
           "weight": 1,
           "functions": [
             {
               "function": "minecraft:enchant_with_levels",
               "levels": {
                 "type": "minecraft:uniform",
-                "min": 5.0,
-                "max": 15.0
+                "min": 5,
+                "max": 15
               },
               "options": "#minecraft:on_random_loot"
             }
@@ -494,15 +369,15 @@
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_shovel",
+          "name": "minecraft:copper_shovel",
           "weight": 1,
           "functions": [
             {
               "function": "minecraft:enchant_with_levels",
               "levels": {
                 "type": "minecraft:uniform",
-                "min": 5.0,
-                "max": 15.0
+                "min": 5,
+                "max": 15
               },
               "options": "#minecraft:on_random_loot"
             }
@@ -510,15 +385,31 @@
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_sword",
+          "name": "minecraft:copper_sword",
           "weight": 1,
           "functions": [
             {
               "function": "minecraft:enchant_with_levels",
               "levels": {
                 "type": "minecraft:uniform",
-                "min": 5.0,
-                "max": 12.0
+                "min": 5,
+                "max": 12
+              },
+              "options": "#minecraft:on_random_loot"
+            }
+          ]
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_spear",
+          "weight": 1,
+          "functions": [
+            {
+              "function": "minecraft:enchant_with_levels",
+              "levels": {
+                "type": "minecraft:uniform",
+                "min": 5,
+                "max": 12
               },
               "options": "#minecraft:on_random_loot"
             }
@@ -529,61 +420,81 @@
     {
       "rolls": {
         "type": "minecraft:uniform",
-        "min": 0.0,
-        "max": 1.0
+        "min": 0,
+        "max": 1
       },
       "entries": [
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_helmet",
-          "weight": 4
+          "name": "minecraft:leather_helmet",
+          "weight": 3
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_chestplate",
-          "weight": 4
+          "name": "minecraft:leather_chestplate",
+          "weight": 3
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_leggings",
-          "weight": 4
+          "name": "minecraft:leather_leggings",
+          "weight": 3
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_boots",
-          "weight": 4
+          "name": "minecraft:leather_boots",
+          "weight": 3
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:chainmail_helmet",
-          "weight": 5
+          "name": "minecraft:golden_helmet",
+          "weight": 3
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:chainmail_chestplate",
-          "weight": 5
+          "name": "minecraft:golden_chestplate",
+          "weight": 3
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:chainmail_leggings",
-          "weight": 5
+          "name": "minecraft:golden_leggings",
+          "weight": 3
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:chainmail_boots",
-          "weight": 5
+          "name": "minecraft:golden_boots",
+          "weight": 3
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_helmet",
+          "name": "minecraft:copper_helmet",
+          "weight": 3
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_chestplate",
+          "weight": 3
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_leggings",
+          "weight": 3
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_boots",
+          "weight": 3
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:leather_helmet",
           "weight": 1,
           "functions": [
             {
               "function": "minecraft:enchant_with_levels",
               "levels": {
                 "type": "minecraft:uniform",
-                "min": 5.0,
-                "max": 12.0
+                "min": 5,
+                "max": 12
               },
               "options": "#minecraft:on_random_loot"
             }
@@ -591,15 +502,15 @@
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_chestplate",
+          "name": "minecraft:leather_chestplate",
           "weight": 1,
           "functions": [
             {
               "function": "minecraft:enchant_with_levels",
               "levels": {
                 "type": "minecraft:uniform",
-                "min": 5.0,
-                "max": 12.0
+                "min": 5,
+                "max": 12
               },
               "options": "#minecraft:on_random_loot"
             }
@@ -607,15 +518,15 @@
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_leggings",
+          "name": "minecraft:leather_leggings",
           "weight": 1,
           "functions": [
             {
               "function": "minecraft:enchant_with_levels",
               "levels": {
                 "type": "minecraft:uniform",
-                "min": 5.0,
-                "max": 12.0
+                "min": 5,
+                "max": 12
               },
               "options": "#minecraft:on_random_loot"
             }
@@ -623,15 +534,143 @@
         },
         {
           "type": "minecraft:item",
-          "name": "minecraft:iron_boots",
+          "name": "minecraft:leather_boots",
           "weight": 1,
           "functions": [
             {
               "function": "minecraft:enchant_with_levels",
               "levels": {
                 "type": "minecraft:uniform",
-                "min": 5.0,
-                "max": 12.0
+                "min": 5,
+                "max": 12
+              },
+              "options": "#minecraft:on_random_loot"
+            }
+          ]
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:golden_helmet",
+          "weight": 1,
+          "functions": [
+            {
+              "function": "minecraft:enchant_with_levels",
+              "levels": {
+                "type": "minecraft:uniform",
+                "min": 5,
+                "max": 12
+              },
+              "options": "#minecraft:on_random_loot"
+            }
+          ]
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:golden_chestplate",
+          "weight": 1,
+          "functions": [
+            {
+              "function": "minecraft:enchant_with_levels",
+              "levels": {
+                "type": "minecraft:uniform",
+                "min": 5,
+                "max": 12
+              },
+              "options": "#minecraft:on_random_loot"
+            }
+          ]
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:golden_leggings",
+          "weight": 1,
+          "functions": [
+            {
+              "function": "minecraft:enchant_with_levels",
+              "levels": {
+                "type": "minecraft:uniform",
+                "min": 5,
+                "max": 12
+              },
+              "options": "#minecraft:on_random_loot"
+            }
+          ]
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:golden_boots",
+          "weight": 1,
+          "functions": [
+            {
+              "function": "minecraft:enchant_with_levels",
+              "levels": {
+                "type": "minecraft:uniform",
+                "min": 5,
+                "max": 12
+              },
+              "options": "#minecraft:on_random_loot"
+            }
+          ]
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_helmet",
+          "weight": 1,
+          "functions": [
+            {
+              "function": "minecraft:enchant_with_levels",
+              "levels": {
+                "type": "minecraft:uniform",
+                "min": 5,
+                "max": 12
+              },
+              "options": "#minecraft:on_random_loot"
+            }
+          ]
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_chestplate",
+          "weight": 1,
+          "functions": [
+            {
+              "function": "minecraft:enchant_with_levels",
+              "levels": {
+                "type": "minecraft:uniform",
+                "min": 5,
+                "max": 12
+              },
+              "options": "#minecraft:on_random_loot"
+            }
+          ]
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_leggings",
+          "weight": 1,
+          "functions": [
+            {
+              "function": "minecraft:enchant_with_levels",
+              "levels": {
+                "type": "minecraft:uniform",
+                "min": 5,
+                "max": 12
+              },
+              "options": "#minecraft:on_random_loot"
+            }
+          ]
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:copper_boots",
+          "weight": 1,
+          "functions": [
+            {
+              "function": "minecraft:enchant_with_levels",
+              "levels": {
+                "type": "minecraft:uniform",
+                "min": 5,
+                "max": 12
               },
               "options": "#minecraft:on_random_loot"
             }
@@ -642,48 +681,13 @@
     {
       "rolls": {
         "type": "minecraft:uniform",
-        "min": 0.0,
-        "max": 1.0
+        "min": 0,
+        "max": 1
       },
       "entries": [
         {
           "type": "minecraft:empty",
           "weight": 18
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:bucket",
-          "weight": 5
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:water_bucket",
-          "weight": 1
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:flint_and_steel",
-          "weight": 1
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:fishing_rod",
-          "weight": 1
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:shears",
-          "weight": 1
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:compass",
-          "weight": 1
-        },
-        {
-          "type": "minecraft:item",
-          "name": "minecraft:clock",
-          "weight": 1
         },
         {
           "type": "minecraft:item",
@@ -700,8 +704,8 @@
     {
       "rolls": {
         "type": "minecraft:uniform",
-        "min": 0.0,
-        "max": 1.0
+        "min": 0,
+        "max": 1
       },
       "entries": [
         {
@@ -717,8 +721,8 @@
               "function": "minecraft:set_count",
               "count": {
                 "type": "minecraft:uniform",
-                "min": 2.0,
-                "max": 8.0
+                "min": 2,
+                "max": 8
               }
             }
           ]
@@ -729,8 +733,14 @@
           "weight": 1,
           "functions": [
             {
-              "function": "minecraft:enchant_randomly",
-              "options": "minecraft:protection"
+              "function": "minecraft:set_enchantments",
+              "enchantments": {
+                "minecraft:protection": {
+                  "type": "minecraft:uniform",
+                  "min": 1,
+                  "max": 2
+                }
+              }
             }
           ]
         },
@@ -740,8 +750,14 @@
           "weight": 1,
           "functions": [
             {
-              "function": "minecraft:enchant_randomly",
-              "options": "minecraft:projectile_protection"
+              "function": "minecraft:set_enchantments",
+              "enchantments": {
+                "minecraft:projectile_protection": {
+                  "type": "minecraft:uniform",
+                  "min": 1,
+                  "max": 2
+                }
+              }
             }
           ]
         },
@@ -751,8 +767,14 @@
           "weight": 1,
           "functions": [
             {
-              "function": "minecraft:enchant_randomly",
-              "options": "minecraft:sharpness"
+              "function": "minecraft:set_enchantments",
+              "enchantments": {
+                "minecraft:sharpness": {
+                  "type": "minecraft:uniform",
+                  "min": 1,
+                  "max": 2
+                }
+              }
             }
           ]
         },
@@ -762,8 +784,14 @@
           "weight": 1,
           "functions": [
             {
-              "function": "minecraft:enchant_randomly",
-              "options": "minecraft:efficiency"
+              "function": "minecraft:set_enchantments",
+              "enchantments": {
+                "minecraft:efficiency": {
+                  "type": "minecraft:uniform",
+                  "min": 1,
+                  "max": 2
+                }
+              }
             }
           ]
         },
@@ -773,8 +801,14 @@
           "weight": 1,
           "functions": [
             {
-              "function": "minecraft:enchant_randomly",
-              "options": "minecraft:unbreaking"
+              "function": "minecraft:set_enchantments",
+              "enchantments": {
+                "minecraft:unbreaking": {
+                  "type": "minecraft:uniform",
+                  "min": 1,
+                  "max": 2
+                }
+              }
             }
           ]
         },
@@ -784,8 +818,14 @@
           "weight": 1,
           "functions": [
             {
-              "function": "minecraft:enchant_randomly",
-              "options": "minecraft:power"
+              "function": "minecraft:set_enchantments",
+              "enchantments": {
+                "minecraft:power": {
+                  "type": "minecraft:uniform",
+                  "min": 1,
+                  "max": 2
+                }
+              }
             }
           ]
         },
@@ -795,8 +835,14 @@
           "weight": 1,
           "functions": [
             {
-              "function": "minecraft:enchant_randomly",
-              "options": "minecraft:feather_falling"
+              "function": "minecraft:set_enchantments",
+              "enchantments": {
+                "minecraft:feather_falling": {
+                  "type": "minecraft:uniform",
+                  "min": 1,
+                  "max": 2
+                }
+              }
             }
           ]
         }

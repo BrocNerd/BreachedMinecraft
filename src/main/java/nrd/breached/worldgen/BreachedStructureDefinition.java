@@ -62,7 +62,8 @@ public record BreachedStructureDefinition(
 
     public enum HeightSelection {
         ORIGIN_SURFACE,
-        MEDIAN_SURFACE
+        MEDIAN_SURFACE,
+        HIGHEST_SURFACE
     }
 
     public enum PlacementMode {

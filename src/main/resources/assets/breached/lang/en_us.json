@@ -12,6 +12,6 @@
   "item.breached.netherite_breacher": "Netherite Breacher",
   "item.breached.probe": "Probe",
   "item.breached.reinforcer": "Reinforcer",
-  "generator.breached.breached_island": "Breached Island",
-  "generator.breached.small_breached_island": "Small Breach Island"
+  "generator.breached.breached_island": "Breached World",
+  "generator.breached.small_breached_island": "Small Breached World"
 }

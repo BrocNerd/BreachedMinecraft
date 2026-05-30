@@ -2,15 +2,15 @@
   "type": "minecraft:crafting_shaped",
   "category": "misc",
   "key": {
-    "B": "minecraft:beacon",
-    "D": "minecraft:diamond_block",
+    "B": "minecraft:dragon_breath",
     "N": "minecraft:netherite_block",
+    "S": "minecraft:nether_star",
     "T": "breached:tier_2_crafting_bench"
   },
   "pattern": [
-    "DBD",
-    "DTD",
-    "DND"
+    "NSN",
+    "NTN",
+    "NBN"
   ],
   "result": {
     "count": 1,

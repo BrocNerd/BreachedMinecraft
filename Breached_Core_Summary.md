@@ -4,6 +4,7 @@ This file explains the stable design philosophy of Breached.
 
 Codex should use this file to understand the overall purpose of the mod, but exact current behavior should come from Breached_Roadmap.md.
 
+Breached — Core Mod Summary
 Breached is a Rust-inspired Minecraft survival/PvP/raiding mod designed around a tight competitive gameplay loop: players loot, fight, breach, upgrade, and build stronger bases to protect what they have earned.
 
 The mod creates a smaller, more controlled Minecraft world where progression is driven by custom loot, protected bases, limited world access, and intentional points of conflict. Instead of relying on normal Minecraft’s open-ended progression, Breached pushes players toward exploration, PvP, structure control, and base breaching as the main path to advancement.
@@ -34,10 +35,10 @@ Core Design Pillars
 7. Respawn and Recovery
    Beds function as respawn points rather than night-skipping tools. The goal is to support PvP and raiding while still giving players a way to recover after death or breaches, so losing a fight or getting breached does not feel like the end of the game.
 
-9. Short-Term Server Seasons
+8. Short-Term Server Seasons
    Breached is intended to work especially well for shorter competitive seasons. The game should reward active players without letting early grinders become impossible to catch. The best version of the mod keeps players engaged over a limited timeframe without making casual players feel permanently behind.
 
 Primary Aim of Breached
-The goal of Breached is to turn Minecraft into a focused survival-raiding experience where every major system supports the same loop, while maintining it's identity as minecraft: players venture out for loot, encounter other players, fight or escape, breach enemy bases, upgrade their own position, and prepare for the next conflict.
+The goal of Breached is to turn Minecraft into a focused survival-raiding experience where every major system supports the same loop, while maintaining its identity as minecraft: players venture out for loot, encounter other players, fight or escape, breach enemy bases, upgrade their own position, and prepare for the next conflict.
 
 Every design element should be judged by whether it strengthens that loop. If a feature does not improve looting, PvP, breaching, progression, recovery, or base-building, it should be simplified, postponed, or removed. If a feature makes minecraft stop feeling like minecraft, it should be simplified, postponed, or removed.

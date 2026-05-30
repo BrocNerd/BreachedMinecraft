@@ -2,6 +2,7 @@ package nrd.breached.worldgen;
 
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.block.Block;
@@ -10,6 +11,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.block.LeavesBlock;
 import net.minecraft.block.NetherPortalBlock;
 import net.minecraft.block.BlockState;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.inventory.LootableInventory;
@@ -46,6 +48,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 public final class BreachedStructurePlacementManager {
     private static final int CHUNK_SIZE = 16;
@@ -74,12 +77,15 @@ public final class BreachedStructurePlacementManager {
             2,
             1
     };
+    private static final String TOWNHALL_STRUCTURE_KEY = BreachedStructureDefinitions.key(BreachedStructureDefinitions.TOWNHALL);
     private static final String PORTAL_STRUCTURE_KEY = BreachedStructureDefinitions.key(BreachedStructureDefinitions.OFFICIAL_NETHER_PORTAL);
     private static final String EYEBALL_STRUCTURE_KEY = BreachedStructureDefinitions.key(BreachedStructureDefinitions.EYEBALL);
     private static final String SKYHOME_STRUCTURE_KEY = BreachedStructureDefinitions.key(BreachedStructureDefinitions.SKY_HOME);
     private static final int EYEBALL_BORDER_MARGIN_BLOCKS = 100;
     private static final int EYEBALL_CANDIDATE_SPREAD_BLOCKS = 48;
     private static final int EYEBALL_ORIGIN_Y = 200;
+    private static final int EYEBALL_LANDLOCK_EXCLUSION_RADIUS = 32;
+    private static final int EYEBALL_LANDLOCK_EXCLUSION_RADIUS_SQUARED = EYEBALL_LANDLOCK_EXCLUSION_RADIUS * EYEBALL_LANDLOCK_EXCLUSION_RADIUS;
     private static final int SKYHOME_MIN_ORIGIN_Y = 120;
     private static final int SKYHOME_MAX_ORIGIN_Y = 200;
     private static final int BIG_BOAT_MIN_EXPANDED_CANDIDATES = 384;
@@ -87,6 +93,7 @@ public final class BreachedStructurePlacementManager {
     private static final int MINOR_FOREST_VEGETATION_OBSTRUCTION_LIMIT = 256;
     private static final int MINOR_POI_PLAYER_REPLACED_BLOCK_PERCENT = 25;
     private static final int MINOR_POI_CHUNK_INSET = 2;
+    private static final int MAJOR_ZONE_MESSAGE_INTERVAL_TICKS = 20;
     private static final Set<PendingStructurePlacement> PENDING_PLACEMENTS = new HashSet<>();
     private static final Set<ForcedStructureChunk> FORCED_CHUNKS = new HashSet<>();
     private static final Set<ForcedRestockChunk> FORCED_RESTOCK_CHUNKS = new HashSet<>();
@@ -94,6 +101,7 @@ public final class BreachedStructurePlacementManager {
     private static final Set<PendingMinorPoiChunk> PENDING_MINOR_POI_CHUNKS = new HashSet<>();
     private static final Set<Long> COMPLETED_PLANNED_STRUCTURE_WORLDS = new HashSet<>();
     private static final Map<String, Set<BlockPos>> EXACT_PROTECTION_BLOCKS = new HashMap<>();
+    private static final Map<UUID, String> PLAYER_MAJOR_ZONE_KEYS = new HashMap<>();
 
     private BreachedStructurePlacementManager() {
     }
@@ -101,7 +109,9 @@ public final class BreachedStructurePlacementManager {
     public static void register() {
         ServerChunkEvents.CHUNK_LOAD.register(BreachedStructurePlacementManager::handleChunkLoad);
         ServerTickEvents.END_WORLD_TICK.register(BreachedStructurePlacementManager::placePendingStructures);
+        ServerTickEvents.END_WORLD_TICK.register(BreachedStructurePlacementManager::tickMajorZoneMessages);
         registerProtectionEvents();
+        registerSafezoneEvents();
     }
 
     private static void handleChunkLoad(ServerWorld world, WorldChunk chunk) {
@@ -319,6 +329,127 @@ public final class BreachedStructurePlacementManager {
             diagnostics.totalNanos = elapsedSince(tickStartNanos);
             diagnostics.logIfSlow();
         }
+    }
+
+    private static void tickMajorZoneMessages(ServerWorld world) {
+        if (!isStructurePlacementWorld(world) || world.getTime() % MAJOR_ZONE_MESSAGE_INTERVAL_TICKS != 0) {
+            return;
+        }
+
+        BreachedStructurePlacementState state = BreachedStructurePlacementState.get(world.getServer());
+        Set<UUID> activePlayerIds = new HashSet<>();
+        for (ServerPlayerEntity player : world.getPlayers()) {
+            UUID playerId = player.getUuid();
+            activePlayerIds.add(playerId);
+
+            Optional<MajorStructureZone> currentZone = getCurrentMajorStructureZone(world, state, player.getBlockPos());
+            if (currentZone.isEmpty()) {
+                PLAYER_MAJOR_ZONE_KEYS.remove(playerId);
+                continue;
+            }
+
+            String previousZoneKey = PLAYER_MAJOR_ZONE_KEYS.get(playerId);
+            if (currentZone.get().placementKey().equals(previousZoneKey)) {
+                continue;
+            }
+
+            PLAYER_MAJOR_ZONE_KEYS.put(playerId, currentZone.get().placementKey());
+            player.sendMessage(currentZone.get().entryMessage(), true);
+        }
+
+        PLAYER_MAJOR_ZONE_KEYS.keySet().removeIf(playerId -> !activePlayerIds.contains(playerId));
+    }
+
+    private static Optional<MajorStructureZone> getCurrentMajorStructureZone(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            BlockPos pos
+    ) {
+        MajorStructureZone bestZone = null;
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> entry : state.placements()) {
+            BreachedStructurePlacementState.SavedPlacement placement = entry.getValue();
+            if (!placement.active()) {
+                continue;
+            }
+
+            Optional<BreachedStructureDefinition> definition = getMajorDefinition(entry.getKey())
+                    .map(baseDefinition -> getActiveDefinition(world, baseDefinition));
+            if (definition.isEmpty() || !world.getRegistryKey().equals(definition.get().requiredDimension())) {
+                continue;
+            }
+
+            long distanceSquared = getMajorStructureZoneDistanceSquared(definition.get(), placement, pos);
+            if (distanceSquared < 0L) {
+                continue;
+            }
+
+            MajorStructureZone zone = new MajorStructureZone(
+                    entry.getKey(),
+                    getMajorZoneEntryMessage(definition.get()),
+                    definition.get().priority(),
+                    distanceSquared
+            );
+            if (bestZone == null || isBetterMajorStructureZone(zone, bestZone)) {
+                bestZone = zone;
+            }
+        }
+
+        return Optional.ofNullable(bestZone);
+    }
+
+    private static long getMajorStructureZoneDistanceSquared(
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        if (definition.protectedStructure() && definition.protectionRadius() > 0) {
+            long xDistance = pos.getX() - placement.centerX();
+            long yDistance = pos.getY() - getProtectedCenterY(placement, pos);
+            long zDistance = pos.getZ() - placement.centerZ();
+            long distanceSquared = xDistance * xDistance + yDistance * yDistance + zDistance * zDistance;
+            return distanceSquared <= definition.protectionRadiusSquared() ? distanceSquared : -1L;
+        }
+
+        if (isExactProtectedStructure(definition) && isInsidePlacementBounds(placement, pos)) {
+            return 0L;
+        }
+
+        return -1L;
+    }
+
+    private static boolean isBetterMajorStructureZone(MajorStructureZone candidate, MajorStructureZone current) {
+        if (candidate.priority() != current.priority()) {
+            return candidate.priority() > current.priority();
+        }
+
+        return candidate.distanceSquared() < current.distanceSquared();
+    }
+
+    private static Text getMajorZoneEntryMessage(BreachedStructureDefinition definition) {
+        String structureKey = BreachedStructureDefinitions.key(definition);
+        if (structureKey.equals(TOWNHALL_STRUCTURE_KEY)) {
+            return Text.literal("Entering Town Hall Safezone").formatted(Formatting.GOLD);
+        }
+        if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.SWORD_STATUE))) {
+            return Text.literal("Entering Sword Statue").formatted(Formatting.BLACK);
+        }
+        if (structureKey.equals(PORTAL_STRUCTURE_KEY)) {
+            return Text.literal("Entering Nether Portal").formatted(Formatting.DARK_PURPLE);
+        }
+        if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.HORACE))) {
+            return Text.literal("Entering Horace").formatted(Formatting.RED);
+        }
+        if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.PINK_TREE))) {
+            return Text.literal("Entering Pink Tree").formatted(Formatting.LIGHT_PURPLE);
+        }
+        if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.BIG_BOAT))) {
+            return Text.literal("Entering Big Boat").formatted(Formatting.BLUE);
+        }
+        if (structureKey.equals(EYEBALL_STRUCTURE_KEY)) {
+            return Text.literal("Entering Eyeball").formatted(Formatting.DARK_RED);
+        }
+
+        return Text.literal("Entering major structure").formatted(Formatting.GOLD);
     }
 
     private static boolean isStructurePlacementWorld(ServerWorld world) {
@@ -1635,6 +1766,7 @@ public final class BreachedStructurePlacementManager {
         } else if (definition.protectedStructure()) {
             System.out.println("[Breached] Registered protected structure " + definition.logName()
                     + " around x " + BreachedStructureSpawnManager.getProtectedCenterX(placement)
+                    + ", y " + BreachedStructureSpawnManager.getProtectedCenterY(placement)
                     + ", z " + BreachedStructureSpawnManager.getProtectedCenterZ(placement)
                     + " radius " + definition.protectionRadius() + ".");
         }
@@ -1702,6 +1834,10 @@ public final class BreachedStructurePlacementManager {
 
     private static boolean isSkyHomeStructure(BreachedStructureDefinition definition) {
         return BreachedStructureDefinitions.key(definition).equals(SKYHOME_STRUCTURE_KEY);
+    }
+
+    private static boolean isTownhallStructure(BreachedStructureDefinition definition) {
+        return BreachedStructureDefinitions.key(definition).equals(TOWNHALL_STRUCTURE_KEY);
     }
 
     private static boolean isBigBoatStructure(BreachedStructureDefinition definition) {
@@ -1785,6 +1921,10 @@ public final class BreachedStructurePlacementManager {
             return generateEyeballCornerCandidates(world, definition);
         }
 
+        if (isTownhallStructure(definition)) {
+            return generateTownhallCenteredCandidate(world, definition);
+        }
+
         if (isBigBoatStructure(definition)) {
             return generateBigBoatExpandedCandidates(world, definition);
         }
@@ -1794,6 +1934,19 @@ public final class BreachedStructurePlacementManager {
         }
 
         return generateRadiusCandidates(world, definition);
+    }
+
+    private static List<BreachedStructureSpawnManager.RadiusCandidate> generateTownhallCenteredCandidate(
+            ServerWorld world,
+            BreachedStructureDefinition definition
+    ) {
+        Optional<StructureTemplate> template = world.getStructureTemplateManager().getTemplate(definition.structureId());
+        Vec3i footprintSize = template
+                .map(value -> BreachedStructureSpawnManager.getRotatedSize(value.getSize(), definition.rotation()))
+                .orElse(new Vec3i(1, 1, 1));
+        int originX = definition.centerX() - Math.max(1, footprintSize.getX()) / 2;
+        int originZ = definition.centerZ() - Math.max(1, footprintSize.getZ()) / 2;
+        return List.of(new BreachedStructureSpawnManager.RadiusCandidate(1, originX, originZ, 0, 0.0D));
     }
 
     private static List<BreachedStructureSpawnManager.RadiusCandidate> generateEyeballCornerCandidates(
@@ -2547,6 +2700,9 @@ public final class BreachedStructurePlacementManager {
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.OFFICIAL_NETHER_PORTAL))) {
             return Text.literal("The Nether portal structures have been restocked.").formatted(Formatting.DARK_PURPLE);
         }
+        if (structureKey.equals(EYEBALL_STRUCTURE_KEY)) {
+            return Text.literal("The Eyeball has been restocked").formatted(Formatting.DARK_RED);
+        }
 
         return Text.literal("Major structure loot has been restocked");
     }
@@ -3270,6 +3426,59 @@ public final class BreachedStructurePlacementManager {
         });
     }
 
+    private static void registerSafezoneEvents() {
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+            if (!(entity instanceof ServerPlayerEntity victim)) {
+                return true;
+            }
+
+            Entity attacker = source.getAttacker();
+            if (!(attacker instanceof PlayerEntity attackingPlayer) || attacker == victim) {
+                return true;
+            }
+
+            if (!isInsideTownhallSafezone(victim.getEntityWorld(), victim.getBlockPos())
+                    && !isInsideTownhallSafezone(attackingPlayer.getEntityWorld(), attackingPlayer.getBlockPos())) {
+                return true;
+            }
+
+            if (attackingPlayer instanceof ServerPlayerEntity serverAttacker) {
+                serverAttacker.sendMessage(Text.literal("PvP is disabled inside the Town Hall safezone."), false);
+            }
+            return false;
+        });
+    }
+
+    public static boolean isInsideTownhallSafezone(World world, BlockPos pos) {
+        if (world.isClient() || !world.getRegistryKey().equals(World.OVERWORLD) || !(world instanceof ServerWorld serverWorld)) {
+            return false;
+        }
+
+        Optional<BreachedStructureDefinition> definition = getActiveDefinition(serverWorld, TOWNHALL_STRUCTURE_KEY);
+        if (definition.isEmpty()) {
+            return false;
+        }
+
+        BreachedStructurePlacementState state = BreachedStructurePlacementState.get(serverWorld.getServer());
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
+            if (!placement.getValue().active() || !structureKey(placement.getKey()).equals(TOWNHALL_STRUCTURE_KEY)) {
+                continue;
+            }
+
+            if (BreachedStructureSpawnManager.isInsideProtectionRadius(
+                    definition.get(),
+                    placement.getValue().centerX(),
+                    getProtectedCenterY(placement.getValue(), pos),
+                    placement.getValue().centerZ(),
+                    pos
+            )) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static boolean isInsideProtectedStructure(World world, BlockPos pos) {
         if (world.isClient() || !world.getRegistryKey().equals(World.OVERWORLD) || !(world instanceof ServerWorld serverWorld)) {
             return false;
@@ -3294,9 +3503,31 @@ public final class BreachedStructurePlacementManager {
             if (BreachedStructureSpawnManager.isInsideProtectionRadius(
                     definition.get(),
                     placement.getValue().centerX(),
+                    getProtectedCenterY(placement.getValue(), pos),
                     placement.getValue().centerZ(),
                     pos
             )) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static boolean isInsideEyeballLandlockExclusion(World world, BlockPos pos) {
+        if (world.isClient() || !world.getRegistryKey().equals(World.OVERWORLD) || !(world instanceof ServerWorld serverWorld)) {
+            return false;
+        }
+
+        BreachedStructurePlacementState state = BreachedStructurePlacementState.get(serverWorld.getServer());
+        migrateLegacyCentralSpawnState(serverWorld, state);
+
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
+            if (!placement.getValue().active() || !structureKey(placement.getKey()).equals(EYEBALL_STRUCTURE_KEY)) {
+                continue;
+            }
+
+            if (isInsideEyeballLandlockExclusion(placement.getValue(), pos)) {
                 return true;
             }
         }
@@ -3328,6 +3559,7 @@ public final class BreachedStructurePlacementManager {
             if (BreachedStructureSpawnManager.isInsideProtectionRadius(
                     definition.get(),
                     placement.getValue().centerX(),
+                    getProtectedCenterY(placement.getValue(), pos),
                     placement.getValue().centerZ(),
                     pos
             )) {
@@ -3336,6 +3568,16 @@ public final class BreachedStructurePlacementManager {
         }
 
         return false;
+    }
+
+    private static boolean isInsideEyeballLandlockExclusion(
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        long xDistance = pos.getX() - placement.centerX();
+        long yDistance = pos.getY() - getPlacementCenterY(placement);
+        long zDistance = pos.getZ() - placement.centerZ();
+        return xDistance * xDistance + yDistance * yDistance + zDistance * zDistance <= EYEBALL_LANDLOCK_EXCLUSION_RADIUS_SQUARED;
     }
 
     private static boolean isExactProtectedStructure(BreachedStructureDefinition definition) {
@@ -3375,6 +3617,22 @@ public final class BreachedStructurePlacementManager {
                 && pos.getY() < placement.originY() + placement.sizeY()
                 && pos.getZ() >= placement.originZ()
                 && pos.getZ() < placement.originZ() + placement.sizeZ();
+    }
+
+    private static int getProtectedCenterY(BreachedStructurePlacementState.SavedPlacement placement, BlockPos pos) {
+        if (placement.sizeY() <= 0) {
+            return pos.getY();
+        }
+
+        return getPlacementCenterY(placement);
+    }
+
+    private static int getPlacementCenterY(BreachedStructurePlacementState.SavedPlacement placement) {
+        if (placement.sizeY() <= 0) {
+            return placement.originY();
+        }
+
+        return placement.originY() + placement.sizeY() / 2;
     }
 
     private static Set<BlockPos> getExactProtectionBlocks(ServerWorld world, BreachedStructureDefinition definition) {
@@ -3521,6 +3779,9 @@ public final class BreachedStructurePlacementManager {
         private static long toMillis(long nanos) {
             return Math.max(0L, nanos / 1_000_000L);
         }
+    }
+
+    private record MajorStructureZone(String placementKey, Text entryMessage, int priority, long distanceSquared) {
     }
 
     private record PendingStructurePlacement(

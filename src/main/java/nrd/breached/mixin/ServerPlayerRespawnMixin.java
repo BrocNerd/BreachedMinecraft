@@ -1,46 +1,72 @@
 package nrd.breached.mixin;
 
-import net.minecraft.block.BedBlock;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
+import net.minecraft.storage.ReadView;
+import net.minecraft.storage.WriteView;
 import net.minecraft.text.Text;
 import net.minecraft.world.TeleportTarget;
 import nrd.breached.respawn.RespawnCooldownManager;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(ServerPlayerEntity.class)
 public class ServerPlayerRespawnMixin {
     @Inject(method = "getRespawnTarget", at = @At("HEAD"), cancellable = true)
-    private void breached$redirectBedRespawnOnCooldown(boolean alive, TeleportTarget.PostDimensionTransition postDimensionTransition, CallbackInfoReturnable<TeleportTarget> cir) {
+    private void breached$getAvailableBedRespawnTarget(boolean alive, TeleportTarget.PostDimensionTransition postDimensionTransition, CallbackInfoReturnable<TeleportTarget> cir) {
         ServerPlayerEntity player = (ServerPlayerEntity) (Object) this;
-        if (!hasBedRespawnPoint(player) || !RespawnCooldownManager.isBedRespawnOnCooldown(player)) {
-            return;
-        }
-
-        RespawnCooldownManager.clearPendingBedRespawn(player);
-        player.sendMessage(Text.literal("Your bed is on cooldown. Respawning at world spawn."), false);
-        cir.setReturnValue(TeleportTarget.noRespawnPointSet(player, postDimensionTransition));
+        RespawnCooldownManager.getAvailableBedRespawnTarget(player, postDimensionTransition)
+                .ifPresent(cir::setReturnValue);
     }
 
     @Inject(method = "getRespawnTarget", at = @At("RETURN"))
     private void breached$markBedRespawn(boolean alive, TeleportTarget.PostDimensionTransition postDimensionTransition, CallbackInfoReturnable<TeleportTarget> cir) {
         ServerPlayerEntity player = (ServerPlayerEntity) (Object) this;
         TeleportTarget target = cir.getReturnValue();
-        if (hasBedRespawnPoint(player) && target != null && !target.missingRespawnBlock()) {
-            RespawnCooldownManager.markPendingBedRespawn(player);
+        ServerPlayerEntity.Respawn respawn = player.getRespawn();
+        if (target != null && !target.missingRespawnBlock()) {
+            RespawnCooldownManager.trackBedRespawnPoint(player, respawn);
+            RespawnCooldownManager.markPendingBedRespawn(player, respawn);
         }
     }
 
-    private static boolean hasBedRespawnPoint(ServerPlayerEntity player) {
-        ServerPlayerEntity.Respawn respawn = player.getRespawn();
-        if (respawn == null || respawn.respawnData() == null) {
-            return false;
+    @Inject(method = "setSpawnPoint", at = @At("HEAD"), cancellable = true)
+    private void breached$blockBedRespawnPointChangeOnCooldown(ServerPlayerEntity.Respawn respawn, boolean sendMessage, CallbackInfo ci) {
+        ServerPlayerEntity player = (ServerPlayerEntity) (Object) this;
+        if (!RespawnCooldownManager.isBedRespawnSelectionBlocked(player, respawn)) {
+            return;
         }
 
-        ServerWorld respawnWorld = player.getEntityWorld().getServer().getWorld(respawn.respawnData().getDimension());
-        return respawnWorld != null && respawnWorld.getBlockState(respawn.respawnData().getPos()).getBlock() instanceof BedBlock;
+        if (sendMessage) {
+            player.sendMessage(Text.literal("Beds cannot be changed while a saved bed is on cooldown."), false);
+        }
+
+        ci.cancel();
+    }
+
+    @Inject(method = "setSpawnPoint", at = @At("TAIL"))
+    private void breached$trackBedRespawnPoint(ServerPlayerEntity.Respawn respawn, boolean sendMessage, CallbackInfo ci) {
+        ServerPlayerEntity player = (ServerPlayerEntity) (Object) this;
+        if (!sendMessage) {
+            RespawnCooldownManager.trackBedRespawnPoint(player, respawn);
+            return;
+        }
+
+        RespawnCooldownManager.trackBedRespawnPointAndCreateMessage(player, respawn)
+                .ifPresent(message -> player.sendMessage(message, false));
+    }
+
+    @Inject(method = "readCustomData", at = @At("TAIL"))
+    private void breached$readBedRespawns(ReadView view, CallbackInfo ci) {
+        ServerPlayerEntity player = (ServerPlayerEntity) (Object) this;
+        RespawnCooldownManager.readBedRespawns(player, view);
+    }
+
+    @Inject(method = "writeCustomData", at = @At("TAIL"))
+    private void breached$writeBedRespawns(WriteView view, CallbackInfo ci) {
+        ServerPlayerEntity player = (ServerPlayerEntity) (Object) this;
+        RespawnCooldownManager.writeBedRespawns(player, view);
     }
 }
