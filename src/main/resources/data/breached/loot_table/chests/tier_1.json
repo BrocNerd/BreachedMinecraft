@@ -193,11 +193,6 @@
       "entries": [
         {
           "type": "minecraft:item",
-          "name": "minecraft:damaged_anvil",
-          "weight": 2
-        },
-        {
-          "type": "minecraft:item",
           "name": "minecraft:string",
           "weight": 5,
           "functions": [
@@ -225,6 +220,20 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "minecraft:empty",
+          "weight": 97
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:damaged_anvil",
+          "weight": 3
         }
       ]
     },

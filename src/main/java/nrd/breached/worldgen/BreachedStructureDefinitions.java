@@ -108,6 +108,54 @@ public final class BreachedStructureDefinitions {
             BreachedStructureDefinition.PrePlacementCheck.NONE
     );
 
+    public static final BreachedStructureDefinition END_PORTAL = new BreachedStructureDefinition(
+            "endportal.nbt",
+            Identifier.of(Breached.MOD_ID, "endportal"),
+            World.OVERWORLD,
+            1,
+            1,
+            BreachedStructureDefinition.PlacementMode.CENTER_RADIUS,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            false,
+            0x7E1D0A94C5B23F68L,
+            0,
+            0,
+            0,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            35,
+            BreachedStructureDefinition.SpawnImportance.REQUIRED,
+            BreachedStructureDefinition.SpacingGroup.MAJOR,
+            BreachedStructureDefinition.SpacingPolicy.NONE,
+            0,
+            0,
+            BreachedStructureDefinition.AirPlacementMode.PLACE_AIR,
+            BreachedStructureDefinition.TerrainValidation.LENIENT,
+            BreachedStructureDefinition.HeightSelection.ORIGIN_SURFACE,
+            16,
+            BlockMirror.NONE,
+            BlockRotation.NONE,
+            BreachedStructureDefinition.SurfaceRequirement.ALLOW_WATER,
+            BreachedStructureDefinition.SupportMode.NONE,
+            Blocks.AIR,
+            Blocks.AIR,
+            0,
+            BreachedStructureDefinition.PrePlacementCheck.NONE
+    );
+
     public static final BreachedStructureDefinition OFFICIAL_NETHER_PORTAL = new BreachedStructureDefinition(
             "portal.nbt",
             Identifier.of(Breached.MOD_ID, "portal"),
@@ -926,6 +974,7 @@ public final class BreachedStructureDefinitions {
 
     public static final List<BreachedStructureDefinition> PLANNED_STRUCTURES = List.of(
             TOWNHALL,
+            END_PORTAL,
             SWORD_STATUE,
             OFFICIAL_NETHER_PORTAL,
             HORACE,
@@ -963,6 +1012,7 @@ public final class BreachedStructureDefinitions {
 
     public static final List<BreachedStructureDefinition> ALL_STRUCTURES = List.of(
             TOWNHALL,
+            END_PORTAL,
             SWORD_STATUE,
             OFFICIAL_NETHER_PORTAL,
             HORACE,
@@ -985,6 +1035,7 @@ public final class BreachedStructureDefinitions {
 
     public static final List<BreachedStructureDefinition> PROTECTED_STRUCTURES = List.of(
             TOWNHALL,
+            END_PORTAL,
             SWORD_STATUE,
             OFFICIAL_NETHER_PORTAL,
             HORACE,
@@ -1008,54 +1059,42 @@ public final class BreachedStructureDefinitions {
             BreachedStructureDefinition definition,
             Optional<BreachedDimensionRules.BreachedPreset> preset
     ) {
-        if (preset.isPresent()
-                && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
-                && definition.structureId().equals(HORACE.structureId())) {
+        if (isRegularIslandPreset(preset) && definition.structureId().equals(HORACE.structureId())) {
             return definition.withRadius(150, 425);
         }
 
-        if (preset.isPresent()
-                && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
-                && definition.structureId().equals(PINK_TREE.structureId())) {
+        if (isRegularIslandPreset(preset) && definition.structureId().equals(PINK_TREE.structureId())) {
             return definition.withRadiusAndSpacing(150, 425, 300, 150);
         }
 
-        if (preset.isPresent()
-                && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
-                && definition.structureId().equals(SWORD_STATUE.structureId())) {
+        if (isRegularIslandPreset(preset) && definition.structureId().equals(SWORD_STATUE.structureId())) {
             return definition.withRadiusAndSpacing(100, 425, 300, 150);
         }
 
-        if (preset.isPresent()
-                && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
-                && definition.structureId().equals(OFFICIAL_NETHER_PORTAL.structureId())) {
+        if (isRegularIslandPreset(preset) && definition.structureId().equals(OFFICIAL_NETHER_PORTAL.structureId())) {
             return definition.withRadiusAndSpacing(200, 250, 300, 150);
         }
 
-        if (preset.isPresent()
-                && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
-                && definition.structureId().equals(BIG_BOAT.structureId())) {
+        if (isRegularIslandPreset(preset) && definition.structureId().equals(BIG_BOAT.structureId())) {
             return definition.withRadiusAndSpacing(150, 425, 300, 150);
         }
 
-        if (preset.isPresent()
-                && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
-                && definition.structureId().equals(ABANDONED_HUT.structureId())) {
+        if (isRegularIslandPreset(preset) && definition.structureId().equals(ABANDONED_HUT.structureId())) {
             return definition.withRadiusAndSpacing(48, 425, 96, 48);
         }
 
-        if (preset.isPresent()
-                && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
-                && definition.structureId().equals(CADEN_BOAT.structureId())) {
+        if (isRegularIslandPreset(preset) && definition.structureId().equals(CADEN_BOAT.structureId())) {
             return definition.withCountPerWorld(3).withRadiusAndSpacing(48, 425, 96, 48);
         }
 
-        if (preset.isPresent()
-                && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL
-                && definition.spacingGroup() == BreachedStructureDefinition.SpacingGroup.MINOR) {
+        if (isRegularIslandPreset(preset) && definition.spacingGroup() == BreachedStructureDefinition.SpacingGroup.MINOR) {
             return definition.withRadiusAndSpacing(48, 425, 96, 48);
         }
 
         return definition;
+    }
+
+    private static boolean isRegularIslandPreset(Optional<BreachedDimensionRules.BreachedPreset> preset) {
+        return preset.isPresent() && preset.get() == BreachedDimensionRules.BreachedPreset.REGULAR;
     }
 }

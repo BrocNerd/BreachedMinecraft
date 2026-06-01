@@ -8,7 +8,7 @@ import java.util.Locale;
 import java.util.Optional;
 
 public enum ReinforcementTier {
-    WOOD(0, "Wood", 16, 64),
+    WOOD(0, "Wood", 16, 16),
     IRON(1, "Iron", 64, 4),
     DIAMOND(2, "Diamond", 256, 2);
 
@@ -42,7 +42,7 @@ public enum ReinforcementTier {
 
     public boolean matchesMaterial(ItemStack stack) {
         return switch (this) {
-            case WOOD -> stack.isIn(ItemTags.PLANKS);
+            case WOOD -> stack.isIn(ItemTags.LOGS);
             case IRON -> stack.isOf(Items.IRON_BLOCK);
             case DIAMOND -> stack.isOf(Items.DIAMOND_BLOCK);
         };
@@ -54,7 +54,7 @@ public enum ReinforcementTier {
 
     public String materialDescription() {
         return switch (this) {
-            case WOOD -> "64 planks";
+            case WOOD -> "16 logs";
             case IRON -> "4 iron blocks";
             case DIAMOND -> "2 diamond blocks";
         };

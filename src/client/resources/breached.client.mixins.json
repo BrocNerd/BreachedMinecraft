@@ -4,6 +4,9 @@
   "package": "nrd.breached.mixin.client",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "InGameHudMixin",
+    "InventoryScreenMixin",
+    "ScreenAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

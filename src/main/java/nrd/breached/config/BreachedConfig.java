@@ -142,6 +142,7 @@ public final class BreachedConfig {
     private static Map<String, StructureSettings> createDefaultStructureSettings() {
         Map<String, StructureSettings> settings = new LinkedHashMap<>();
         settings.put("breached:townhall", new StructureSettings(1, null, null));
+        settings.put("breached:endportal", new StructureSettings(1, null, null));
         settings.put("breached:swordstatue", new StructureSettings(96, null, null));
         settings.put("breached:portal", new StructureSettings(64, null, null));
         settings.put("breached:horace", new StructureSettings(64, null, null));

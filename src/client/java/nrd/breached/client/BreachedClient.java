@@ -1,27 +1,40 @@
 package nrd.breached.client;
 
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.client.render.RenderLayers;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexRendering;
 import net.minecraft.client.render.state.OutlineRenderState;
+import net.minecraft.client.util.InputUtil;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ColorHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
 import nrd.breached.Breached;
+import nrd.breached.client.screen.BreachedArchiveScreen;
+import nrd.breached.client.screen.BreachedMapScreen;
 import nrd.breached.item.BreacherItem;
+import nrd.breached.network.OpenBreachedArchivePayload;
+import nrd.breached.network.OpenBreachedMapPayload;
 import nrd.breached.network.ReinforcementOutlinePayload;
+import nrd.breached.network.RequestBreachedMapPayload;
 import nrd.breached.reinforcement.ReinforcementTier;
 import nrd.breached.reinforcement.ReinforcementVisibilityCache;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.List;
 import java.util.Optional;
@@ -29,12 +42,57 @@ import java.util.stream.Collectors;
 
 public class BreachedClient implements ClientModInitializer {
     private static List<ReinforcementOutlineTarget> outlineTargets = List.of();
+    private static final KeyBinding.Category BREACHED_KEY_CATEGORY = KeyBinding.Category.create(Identifier.of(Breached.MOD_ID, "breached"));
+    private static Screen pendingBreachedMapParentScreen;
+    private static KeyBinding openBreachedMapKeyBinding;
 
     @Override
     public void onInitializeClient() {
+        registerBreachedMapKeyBinding();
+        registerArchiveReceiver();
+        registerBreachedMapReceiver();
         registerReinforcementOutlineReceiver();
         registerReinforcementOutlineRenderer();
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> clearReinforcementOutlines());
+    }
+
+    private static void registerArchiveReceiver() {
+        ClientPlayNetworking.registerGlobalReceiver(OpenBreachedArchivePayload.ID, (payload, context) ->
+                context.client().setScreen(new BreachedArchiveScreen()));
+    }
+
+    private static void registerBreachedMapReceiver() {
+        ClientPlayNetworking.registerGlobalReceiver(OpenBreachedMapPayload.ID, (payload, context) -> {
+            Screen parentScreen = pendingBreachedMapParentScreen;
+            pendingBreachedMapParentScreen = null;
+            context.client().setScreen(new BreachedMapScreen(payload, parentScreen));
+        });
+    }
+
+    public static void requestBreachedMap() {
+        pendingBreachedMapParentScreen = MinecraftClient.getInstance().currentScreen;
+        ClientPlayNetworking.send(RequestBreachedMapPayload.INSTANCE);
+    }
+
+    public static boolean matchesOpenBreachedMapKey(KeyInput input) {
+        return openBreachedMapKeyBinding != null && openBreachedMapKeyBinding.matchesKey(input);
+    }
+
+    private static void registerBreachedMapKeyBinding() {
+        openBreachedMapKeyBinding = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.breached.open_map",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_M,
+                BREACHED_KEY_CATEGORY
+        ));
+
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            while (openBreachedMapKeyBinding.wasPressed()) {
+                if (client.player != null && client.world != null && client.currentScreen == null) {
+                    requestBreachedMap();
+                }
+            }
+        });
     }
 
     private static void registerReinforcementOutlineReceiver() {

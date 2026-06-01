@@ -1,8 +1,6 @@
 package nrd.breached.worldgen;
 
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
 import net.minecraft.registry.Registry;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
@@ -12,7 +10,6 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.GlobalPos;
 import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
 import net.minecraft.world.WorldProperties;
@@ -31,28 +28,27 @@ import java.util.Optional;
 
 public final class BreachedDimensionRules {
     private static final double BORDER_CENTER = 0.0D;
-    private static final int SPAWN_SEARCH_STEP = 8;
-    private static final int SPAWN_BORDER_MARGIN = 48;
-    private static final int SPAWN_PLATFORM_RADIUS = 3;
-    private static final PresetRules STANDARD_BREACHED_ISLAND = new PresetRules(
-            BreachedPreset.STANDARD,
+    private static final int TOWNHALL_INITIAL_SPAWN_X = 0;
+    private static final int TOWNHALL_INITIAL_SPAWN_Z = 0;
+    private static final PresetRules BREACHED_ISLAND = new PresetRules(
+            BreachedPreset.REGULAR,
             RegistryKey.of(RegistryKeys.WORLD_PRESET, Identifier.of(Breached.MOD_ID, "breached_island")),
             RegistryKey.of(RegistryKeys.CHUNK_GENERATOR_SETTINGS, Identifier.of(Breached.MOD_ID, "island_overworld")),
             "breached:breached_island",
-            2500.0D,
-            1250.0D
-    );
-    private static final PresetRules SMALL_BREACHED_ISLAND = new PresetRules(
-            BreachedPreset.SMALL,
-            RegistryKey.of(RegistryKeys.WORLD_PRESET, Identifier.of(Breached.MOD_ID, "small_breached_island")),
-            RegistryKey.of(RegistryKeys.CHUNK_GENERATOR_SETTINGS, Identifier.of(Breached.MOD_ID, "small_island_overworld")),
-            "breached:small_breached_island",
             1000.0D,
             500.0D
     );
+    private static final PresetRules LARGE_BREACHED_ISLAND = new PresetRules(
+            BreachedPreset.LARGE,
+            RegistryKey.of(RegistryKeys.WORLD_PRESET, Identifier.of(Breached.MOD_ID, "large_breached_island")),
+            RegistryKey.of(RegistryKeys.CHUNK_GENERATOR_SETTINGS, Identifier.of(Breached.MOD_ID, "large_island_overworld")),
+            "breached:large_breached_island",
+            2500.0D,
+            1250.0D
+    );
     private static final PresetRules[] BREACHED_PRESETS = {
-            STANDARD_BREACHED_ISLAND,
-            SMALL_BREACHED_ISLAND
+            BREACHED_ISLAND,
+            LARGE_BREACHED_ISLAND
     };
 
     private BreachedDimensionRules() {
@@ -74,6 +70,8 @@ public final class BreachedDimensionRules {
             applyWorldSpawn(world, rules.get());
         } else if (world.getRegistryKey().equals(World.NETHER)) {
             applyWorldBorder(world, rules.get().netherBorderSize(), "Nether", rules.get());
+        } else if (world.getRegistryKey().equals(World.END)) {
+            applyWorldBorder(world, rules.get().netherBorderSize(), "End", rules.get());
         }
     }
 
@@ -86,81 +84,23 @@ public final class BreachedDimensionRules {
     }
 
     private static void applyWorldSpawn(ServerWorld world, PresetRules rules) {
-        BlockPos spawnPos = findSafeSpawnPos(world, rules);
-        ((ServerWorldProperties) world.getLevelProperties()).setSpawnPoint(new WorldProperties.SpawnPoint(
-                GlobalPos.create(world.getRegistryKey(), spawnPos),
+        BlockPos spawnPos = BreachedStructurePlacementManager.ensureTownhallSpawnReady(world)
+                .orElseGet(() -> getInitialTownhallSpawnPos(world));
+        ((ServerWorldProperties) world.getLevelProperties()).setSpawnPoint(WorldProperties.SpawnPoint.create(
+                world.getRegistryKey(),
+                spawnPos,
                 0.0F,
                 0.0F
         ));
-        System.out.println("[Breached] Applied Overworld spawn for " + rules.presetId()
+        System.out.println("[Breached] Applied Town Hall spawn for " + rules.presetId()
                 + ": x " + spawnPos.getX()
                 + ", y " + spawnPos.getY()
                 + ", z " + spawnPos.getZ() + ".");
     }
 
-    private static BlockPos findSafeSpawnPos(ServerWorld world, PresetRules rules) {
-        int maxSearchRadius = getSpawnSearchRadius(rules);
-        BlockPos fallback = getSurfaceSpawnPos(world, 0, 0);
-        if (isInsideSpawnBorder(fallback, rules) && isSafeSpawnPos(world, fallback)) {
-            return fallback;
-        }
-
-        for (int radius = SPAWN_SEARCH_STEP; radius <= maxSearchRadius; radius += SPAWN_SEARCH_STEP) {
-            for (int x = -radius; x <= radius; x += SPAWN_SEARCH_STEP) {
-                for (int z = -radius; z <= radius; z += SPAWN_SEARCH_STEP) {
-                    if (Math.abs(x) != radius && Math.abs(z) != radius) {
-                        continue;
-                    }
-
-                    BlockPos candidate = getSurfaceSpawnPos(world, x, z);
-                    if (isInsideSpawnBorder(candidate, rules) && isSafeSpawnPos(world, candidate)) {
-                        return candidate;
-                    }
-                }
-            }
-        }
-
-        return createFallbackSpawnPlatform(world);
-    }
-
-    private static int getSpawnSearchRadius(PresetRules rules) {
-        return Math.max(SPAWN_SEARCH_STEP, (int) (rules.overworldBorderSize() / 2.0D) - SPAWN_BORDER_MARGIN);
-    }
-
-    private static boolean isInsideSpawnBorder(BlockPos pos, PresetRules rules) {
-        int maxCoordinate = getSpawnSearchRadius(rules);
-        return Math.abs(pos.getX()) <= maxCoordinate && Math.abs(pos.getZ()) <= maxCoordinate;
-    }
-
-    private static BlockPos getSurfaceSpawnPos(ServerWorld world, int x, int z) {
-        int y = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
-        return new BlockPos(x, y, z);
-    }
-
-    private static boolean isSafeSpawnPos(ServerWorld world, BlockPos pos) {
-        BlockState below = world.getBlockState(pos.down());
-        return !below.isAir()
-                && !below.isOf(Blocks.WATER)
-                && !below.isOf(Blocks.LAVA)
-                && world.getBlockState(pos).isAir()
-                && world.getBlockState(pos.up()).isAir();
-    }
-
-    private static BlockPos createFallbackSpawnPlatform(ServerWorld world) {
-        BlockPos surfacePos = getSurfaceSpawnPos(world, 0, 0);
-        int platformY = Math.max(world.getSeaLevel() + 1, surfacePos.getY());
-        BlockPos spawnPos = new BlockPos(0, platformY + 1, 0);
-
-        for (int x = -SPAWN_PLATFORM_RADIUS; x <= SPAWN_PLATFORM_RADIUS; x++) {
-            for (int z = -SPAWN_PLATFORM_RADIUS; z <= SPAWN_PLATFORM_RADIUS; z++) {
-                world.setBlockState(new BlockPos(x, platformY, z), Blocks.GRASS_BLOCK.getDefaultState(), 2);
-            }
-        }
-
-        world.setBlockState(spawnPos, Blocks.AIR.getDefaultState(), 2);
-        world.setBlockState(spawnPos.up(), Blocks.AIR.getDefaultState(), 2);
-        System.out.println("[Breached] Created fallback spawn platform at x 0, y " + platformY + ", z 0.");
-        return spawnPos;
+    private static BlockPos getInitialTownhallSpawnPos(ServerWorld world) {
+        int y = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, TOWNHALL_INITIAL_SPAWN_X, TOWNHALL_INITIAL_SPAWN_Z);
+        return new BlockPos(TOWNHALL_INITIAL_SPAWN_X, y, TOWNHALL_INITIAL_SPAWN_Z);
     }
 
     public static boolean shouldBlockNetherPortalCreation(World world, BlockPos pos) {
@@ -217,8 +157,8 @@ public final class BreachedDimensionRules {
     }
 
     public enum BreachedPreset {
-        STANDARD,
-        SMALL
+        REGULAR,
+        LARGE
     }
 
     private record PresetRules(

@@ -44,6 +44,8 @@ public class BreachedStructurePlacementState extends PersistentState {
     private static final String CANDIDATE_INDEX_KEY = "candidate_index";
     private static final String PORTAL_EVENT_END_TIME_KEY = "portal_event_end_time";
     private static final String PORTAL_EVENT_WARNINGS_KEY = "portal_event_warnings";
+    private static final String END_PORTAL_EVENT_END_TIME_KEY = "end_portal_event_end_time";
+    private static final String END_PORTAL_EVENT_WARNINGS_KEY = "end_portal_event_warnings";
     private static final String X_KEY = "x";
     private static final String Y_KEY = "y";
     private static final String Z_KEY = "z";
@@ -66,6 +68,8 @@ public class BreachedStructurePlacementState extends PersistentState {
     private final Map<String, Set<Integer>> failedCandidates = new HashMap<>();
     private long portalEventEndTime;
     private final Set<Integer> portalEventWarnings = new HashSet<>();
+    private long endPortalEventEndTime;
+    private final Set<Integer> endPortalEventWarnings = new HashSet<>();
 
     public static BreachedStructurePlacementState get(MinecraftServer server) {
         return server.getOverworld().getPersistentStateManager().getOrCreate(TYPE);
@@ -414,12 +418,46 @@ public class BreachedStructurePlacementState extends PersistentState {
         markDirty();
     }
 
+    public long getEndPortalEventEndTime() {
+        return endPortalEventEndTime;
+    }
+
+    public boolean isEndPortalEventActive(long worldTime) {
+        return endPortalEventEndTime > worldTime;
+    }
+
+    public void startEndPortalEvent(long endTime) {
+        endPortalEventEndTime = endTime;
+        endPortalEventWarnings.clear();
+        markDirty();
+    }
+
+    public boolean markEndPortalEventWarningSent(int secondsRemaining) {
+        boolean added = endPortalEventWarnings.add(secondsRemaining);
+        if (added) {
+            markDirty();
+        }
+
+        return added;
+    }
+
+    public void clearEndPortalEvent() {
+        if (endPortalEventEndTime == 0L && endPortalEventWarnings.isEmpty()) {
+            return;
+        }
+
+        endPortalEventEndTime = 0L;
+        endPortalEventWarnings.clear();
+        markDirty();
+    }
+
     private NbtCompound toNbt() {
         NbtCompound root = new NbtCompound();
         NbtCompound placementRoot = new NbtCompound();
         NbtCompound reservationRoot = new NbtCompound();
         NbtCompound failedRoot = new NbtCompound();
         NbtCompound portalWarningRoot = new NbtCompound();
+        NbtCompound endPortalWarningRoot = new NbtCompound();
 
         for (Map.Entry<String, SavedPlacement> entry : placements.entrySet()) {
             SavedPlacement placement = entry.getValue();
@@ -502,12 +540,18 @@ public class BreachedStructurePlacementState extends PersistentState {
             portalWarningRoot.putBoolean(Integer.toString(warning), true);
         }
         root.put(PORTAL_EVENT_WARNINGS_KEY, portalWarningRoot);
+        root.putLong(END_PORTAL_EVENT_END_TIME_KEY, endPortalEventEndTime);
+        for (int warning : endPortalEventWarnings) {
+            endPortalWarningRoot.putBoolean(Integer.toString(warning), true);
+        }
+        root.put(END_PORTAL_EVENT_WARNINGS_KEY, endPortalWarningRoot);
         return root;
     }
 
     private static BreachedStructurePlacementState fromNbt(NbtCompound root) {
         BreachedStructurePlacementState state = new BreachedStructurePlacementState();
         state.portalEventEndTime = root.getLong(PORTAL_EVENT_END_TIME_KEY, 0L);
+        state.endPortalEventEndTime = root.getLong(END_PORTAL_EVENT_END_TIME_KEY, state.portalEventEndTime);
         Optional<NbtCompound> placementRoot = root.getCompound(PLACEMENTS_KEY);
         if (placementRoot.isPresent()) {
             for (String key : placementRoot.get().getKeys()) {
@@ -586,6 +630,18 @@ public class BreachedStructurePlacementState extends PersistentState {
                 } catch (NumberFormatException ignored) {
                 }
             }
+        }
+
+        Optional<NbtCompound> endPortalWarningRoot = root.getCompound(END_PORTAL_EVENT_WARNINGS_KEY);
+        if (endPortalWarningRoot.isPresent()) {
+            for (String warning : endPortalWarningRoot.get().getKeys()) {
+                try {
+                    state.endPortalEventWarnings.add(Integer.parseInt(warning));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        } else {
+            state.endPortalEventWarnings.addAll(state.portalEventWarnings);
         }
 
         return state;

@@ -8,7 +8,7 @@
           "type": "minecraft:multi_noise",
           "preset": "minecraft:overworld"
         },
-        "settings": "breached:small_island_overworld"
+        "settings": "breached:large_island_overworld"
       }
     },
     "minecraft:the_end": {
