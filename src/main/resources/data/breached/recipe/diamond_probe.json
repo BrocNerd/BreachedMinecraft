@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "tools",
+  "key": {
+    "D": "minecraft:diamond",
+    "P": "breached:probe"
+  },
+  "pattern": [
+    " D ",
+    "DPD",
+    " D "
+  ],
+  "result": {
+    "count": 1,
+    "id": "breached:diamond_probe"
+  }
+}
