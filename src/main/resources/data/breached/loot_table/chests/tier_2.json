@@ -91,7 +91,7 @@
         {
           "type": "minecraft:item",
           "name": "minecraft:netherite_scrap",
-          "weight": 2
+          "weight": 6
         },
         {
           "type": "minecraft:item",

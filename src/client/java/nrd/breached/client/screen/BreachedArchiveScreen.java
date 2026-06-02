@@ -191,14 +191,14 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Tier 3",
-                                    "The Netherite Crafting Table is late-game power. It unlocks the strongest progression recipes, including the Netherite Breacher, bookshelves, anvils, and the mace.",
+                                    "The Netherite Crafting Table is late-game power. Build it with six netherite ingots, then use it to craft the strongest progression recipes.",
                                     List.of(recipe(
                                             "tier_3_crafting_bench",
                                             "Netherite Crafting Table",
                                             stack(Breached.TIER_3_CRAFTING_BENCH),
-                                            stack(Blocks.NETHERITE_BLOCK), stack(Items.NETHER_STAR), stack(Blocks.NETHERITE_BLOCK),
-                                            stack(Blocks.NETHERITE_BLOCK), stack(Breached.TIER_2_CRAFTING_BENCH), stack(Blocks.NETHERITE_BLOCK),
-                                            stack(Blocks.NETHERITE_BLOCK), stack(Items.DRAGON_BREATH), stack(Blocks.NETHERITE_BLOCK)
+                                            stack(Items.NETHERITE_INGOT), stack(Items.NETHER_STAR), stack(Items.NETHERITE_INGOT),
+                                            stack(Items.NETHERITE_INGOT), stack(Breached.TIER_2_CRAFTING_BENCH), stack(Items.NETHERITE_INGOT),
+                                            stack(Items.NETHERITE_INGOT), stack(Items.DRAGON_BREATH), stack(Items.NETHERITE_INGOT)
                                     ))
                             )
                     )
