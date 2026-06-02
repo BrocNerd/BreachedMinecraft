@@ -147,6 +147,7 @@ public final class BreachedStructureSupportGenerator {
                 || state.isOf(Blocks.FERN)
                 || state.isOf(Blocks.LARGE_FERN)
                 || state.isOf(Blocks.VINE)
+                || state.isOf(Blocks.LEAF_LITTER)
                 || state.isOf(Blocks.SNOW);
     }
 }

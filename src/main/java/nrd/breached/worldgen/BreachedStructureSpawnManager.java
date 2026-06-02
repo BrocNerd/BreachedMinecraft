@@ -43,6 +43,10 @@ public final class BreachedStructureSpawnManager {
     private static final int TOWNHALL_STAIRCASE_MAX_EXTENSION = 128;
     private static final int TOWNHALL_WATER_LANDING_LENGTH = 3;
     private static final int TOWNHALL_WATER_CATCH_RADIUS = 1;
+    private static final int TOWNHALL_WATER_FREEZE_LIGHT_LEVEL = 15;
+    private static final int TOWNHALL_UNDERFLOOR_LIGHT_GRID_RADIUS = 1;
+    private static final int TOWNHALL_UNDERFLOOR_LIGHT_SPACING = 12;
+    private static final int TOWNHALL_UNDERFLOOR_LIGHT_SEARCH_DEPTH = 24;
     private static final List<Block> LOOTABLE_TEMPLATE_BLOCKS = List.of(
             Blocks.CHEST,
             Blocks.TRAPPED_CHEST,
@@ -281,6 +285,7 @@ public final class BreachedStructureSpawnManager {
         applyJigsawAirMarkers(world, templateNbt, pos, placementData);
         applyTownhallStaircasePlaceholders(world, definition, template, pos, placementData);
         applyTownhallWaterPlaceholders(world, definition, template, pos, placementData);
+        applyTownhallUnderfloorSpawnLights(world, definition, template, pos);
         applyTemplateLootTables(world, template, pos, placementData);
 
         BreachedStructurePlacement placement = new BreachedStructurePlacement(
@@ -770,6 +775,7 @@ public final class BreachedStructureSpawnManager {
 
         int waterSources = 0;
         int catchBasins = 0;
+        int freezeLights = 0;
         Set<Long> waterColumnKeys = new HashSet<>();
         for (StructureTemplate.StructureBlockInfo placeholder : placeholders) {
             waterColumnKeys.add(townhallColumnKey(placeholder.pos()));
@@ -784,35 +790,40 @@ public final class BreachedStructureSpawnManager {
 
             world.setBlockState(waterSourcePos, Blocks.WATER.getDefaultState(), BLOCK_UPDATE_FLAGS);
             waterSources++;
+            freezeLights += placeTownhallWaterFreezeLight(world, waterSourcePos);
 
-            if (createTownhallWaterCatchBasin(world, waterSourcePos, waterColumnKeys)) {
+            Optional<BlockPos> catchBasinPos = createTownhallWaterCatchBasin(world, waterSourcePos, waterColumnKeys);
+            if (catchBasinPos.isPresent()) {
                 catchBasins++;
+                freezeLights += placeTownhallWaterFreezeLight(world, catchBasinPos.get());
             }
         }
 
         if (waterSources > 0 || catchBasins > 0) {
             System.out.println("[Breached] Built Town Hall water features from "
                     + waterSources + " resin block placeholders and "
-                    + catchBasins + " catch basins.");
+                    + catchBasins + " catch basins with "
+                    + freezeLights + " hidden freeze-prevention lights.");
         }
     }
 
-    private static boolean createTownhallWaterCatchBasin(
+    private static Optional<BlockPos> createTownhallWaterCatchBasin(
             ServerWorld world,
             BlockPos waterSourcePos,
             Set<Long> waterColumnKeys
     ) {
         Optional<BlockPos> groundSurface = findTownhallGroundSurfaceBelow(world, waterSourcePos);
         if (groundSurface.isEmpty()) {
-            return false;
+            return Optional.empty();
         }
 
         BlockPos catchPos = groundSurface.get();
         if (world.getBlockEntity(catchPos) != null) {
-            return false;
+            return Optional.empty();
         }
 
         clearTownhallWaterDropColumn(world, waterSourcePos, catchPos);
+        clearTownhallWaterDropVegetationArea(world, waterSourcePos, catchPos);
 
         BlockPos floorPos = catchPos.down();
         if (!isTownhallStairGround(world, floorPos, world.getBlockState(floorPos))
@@ -844,7 +855,103 @@ public final class BreachedStructureSpawnManager {
         }
 
         world.setBlockState(catchPos, Blocks.WATER.getDefaultState(), BLOCK_UPDATE_FLAGS);
-        return true;
+        return Optional.of(catchPos);
+    }
+
+    private static int placeTownhallWaterFreezeLight(ServerWorld world, BlockPos waterPos) {
+        int placedLights = 0;
+        placedLights += placeTownhallFreezeLightIfPossible(world, waterPos.up());
+        for (Direction direction : Direction.Type.HORIZONTAL) {
+            placedLights += placeTownhallFreezeLightIfPossible(world, waterPos.offset(direction));
+        }
+
+        return placedLights;
+    }
+
+    private static int placeTownhallFreezeLightIfPossible(ServerWorld world, BlockPos pos) {
+        world.getChunk(Math.floorDiv(pos.getX(), 16), Math.floorDiv(pos.getZ(), 16));
+        BlockState state = world.getBlockState(pos);
+        if (world.getBlockEntity(pos) != null || (!state.isAir() && !state.isOf(Blocks.LIGHT))) {
+            return 0;
+        }
+
+        world.setBlockState(
+                pos,
+                Blocks.LIGHT.getDefaultState().with(Properties.LEVEL_15, TOWNHALL_WATER_FREEZE_LIGHT_LEVEL),
+                BLOCK_UPDATE_FLAGS
+        );
+        return state.isOf(Blocks.LIGHT) ? 0 : 1;
+    }
+
+    private static void applyTownhallUnderfloorSpawnLights(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BlockPos origin
+    ) {
+        if (!definition.structureId().equals(BreachedStructureDefinitions.TOWNHALL.structureId())) {
+            return;
+        }
+
+        Vec3i size = getRotatedSize(template.getSize(), definition.rotation());
+        int minX = origin.getX() + 4;
+        int maxX = origin.getX() + Math.max(4, size.getX() - 5);
+        int minZ = origin.getZ() + 4;
+        int maxZ = origin.getZ() + Math.max(4, size.getZ() - 5);
+        int centerX = origin.getX() + size.getX() / 2;
+        int centerZ = origin.getZ() + size.getZ() / 2;
+        int placedLights = 0;
+        Set<Long> usedColumns = new HashSet<>();
+
+        for (int xOffset = -TOWNHALL_UNDERFLOOR_LIGHT_GRID_RADIUS; xOffset <= TOWNHALL_UNDERFLOOR_LIGHT_GRID_RADIUS; xOffset++) {
+            for (int zOffset = -TOWNHALL_UNDERFLOOR_LIGHT_GRID_RADIUS; zOffset <= TOWNHALL_UNDERFLOOR_LIGHT_GRID_RADIUS; zOffset++) {
+                int x = clamp(centerX + xOffset * TOWNHALL_UNDERFLOOR_LIGHT_SPACING, minX, maxX);
+                int z = clamp(centerZ + zOffset * TOWNHALL_UNDERFLOOR_LIGHT_SPACING, minZ, maxZ);
+                long columnKey = townhallColumnKey(new BlockPos(x, 0, z));
+                if (!usedColumns.add(columnKey)) {
+                    continue;
+                }
+
+                Optional<BlockPos> lightPos = findTownhallUnderfloorLightPos(world, x, origin.getY() - 1, z);
+                if (lightPos.isPresent()) {
+                    placedLights += placeTownhallFreezeLightIfPossible(world, lightPos.get());
+                }
+            }
+        }
+
+        if (placedLights > 0) {
+            System.out.println("[Breached] Placed " + placedLights
+                    + " hidden underfloor spawn lights below Town Hall.");
+        }
+    }
+
+    private static Optional<BlockPos> findTownhallUnderfloorLightPos(ServerWorld world, int x, int startY, int z) {
+        Optional<BlockPos> firstAir = Optional.empty();
+        int minY = Math.max(world.getBottomY(), startY - TOWNHALL_UNDERFLOOR_LIGHT_SEARCH_DEPTH);
+        for (int y = startY; y >= minY; y--) {
+            BlockPos pos = new BlockPos(x, y, z);
+            world.getChunk(Math.floorDiv(pos.getX(), 16), Math.floorDiv(pos.getZ(), 16));
+            BlockState state = world.getBlockState(pos);
+            if (world.getBlockEntity(pos) != null || (!state.isAir() && !state.isOf(Blocks.LIGHT))) {
+                continue;
+            }
+
+            if (firstAir.isEmpty()) {
+                firstAir = Optional.of(pos);
+            }
+
+            BlockPos belowPos = pos.down();
+            BlockState belowState = world.getBlockState(belowPos);
+            if (!belowState.getCollisionShape(world, belowPos).isEmpty()) {
+                return Optional.of(pos);
+            }
+        }
+
+        return firstAir;
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private static Optional<BlockPos> findTownhallGroundSurfaceBelow(ServerWorld world, BlockPos waterSourcePos) {
@@ -873,6 +980,27 @@ public final class BreachedStructureSpawnManager {
         }
     }
 
+    private static void clearTownhallWaterDropVegetationArea(
+            ServerWorld world,
+            BlockPos waterSourcePos,
+            BlockPos catchPos
+    ) {
+        int minY = Math.max(catchPos.getY(), world.getBottomY());
+        for (int y = waterSourcePos.getY() - 1; y >= minY; y--) {
+            for (int xOffset = -TOWNHALL_WATER_CATCH_RADIUS; xOffset <= TOWNHALL_WATER_CATCH_RADIUS; xOffset++) {
+                for (int zOffset = -TOWNHALL_WATER_CATCH_RADIUS; zOffset <= TOWNHALL_WATER_CATCH_RADIUS; zOffset++) {
+                    BlockPos pos = new BlockPos(
+                            waterSourcePos.getX() + xOffset,
+                            y,
+                            waterSourcePos.getZ() + zOffset
+                    );
+                    world.getChunk(Math.floorDiv(pos.getX(), 16), Math.floorDiv(pos.getZ(), 16));
+                    clearTownhallWaterFeatureVegetation(world, pos);
+                }
+            }
+        }
+    }
+
     private static BlockState clearTownhallWaterFeatureVegetation(ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         if (world.getBlockEntity(pos) == null && isTownhallWaterFeatureVegetation(state)) {
@@ -892,6 +1020,7 @@ public final class BreachedStructureSpawnManager {
                 || state.isOf(Blocks.FERN)
                 || state.isOf(Blocks.LARGE_FERN)
                 || state.isOf(Blocks.VINE)
+                || state.isOf(Blocks.LEAF_LITTER)
                 || state.isOf(Blocks.SNOW);
     }
 
