@@ -146,11 +146,12 @@ public final class RespawnCooldownManager {
     }
 
     public static Optional<Text> trackBedRespawnPointAndCreateMessage(ServerPlayerEntity player, ServerPlayerEntity.Respawn respawn) {
-        if (!trackBedRespawnPoint(player, respawn)) {
+        if (!hasValidBedRespawnPoint(player, respawn) || hasActiveBedRespawnCooldown(player)) {
             return Optional.empty();
         }
 
-        return createBedRespawnSelectionMessage(player);
+        boolean removedOldBed = addBedRespawnPoint(player.getUuid(), respawn.respawnData());
+        return Optional.of(createBedRespawnSelectionMessage(removedOldBed));
     }
 
     public static boolean isBedRespawnSelectionBlocked(ServerPlayerEntity player, ServerPlayerEntity.Respawn respawn) {
@@ -262,17 +263,18 @@ public final class RespawnCooldownManager {
         BED_RESPAWN_POINTS.put(playerUuid, List.copyOf(trimmedPoints));
     }
 
-    private static void addBedRespawnPoint(UUID playerUuid, WorldProperties.SpawnPoint point) {
+    private static boolean addBedRespawnPoint(UUID playerUuid, WorldProperties.SpawnPoint point) {
         List<WorldProperties.SpawnPoint> points = new ArrayList<>(BED_RESPAWN_POINTS.getOrDefault(playerUuid, List.of()));
+        boolean alreadySaved = points.stream().anyMatch(existingPoint -> isSameBed(existingPoint, point));
+        boolean removesOldBed = !alreadySaved && points.size() >= MAX_BED_RESPAWN_POINTS;
         points.removeIf(existingPoint -> isSameBed(existingPoint, point));
         points.add(0, point);
         setBedRespawnPoints(playerUuid, points);
+        return removesOldBed;
     }
 
-    private static Optional<Text> createBedRespawnSelectionMessage(ServerPlayerEntity player) {
-        return BED_RESPAWN_POINTS.containsKey(player.getUuid())
-                ? Optional.of(Text.literal("New primary bed set."))
-                : Optional.empty();
+    private static Text createBedRespawnSelectionMessage(boolean removedOldBed) {
+        return Text.literal(removedOldBed ? "New bed saved. Oldest bed removed." : "New bed saved.");
     }
 
     private static Optional<TeleportTarget> createBedRespawnTarget(

@@ -5,12 +5,14 @@ import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.input.KeyInput;
 import net.minecraft.item.ItemConvertible;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.text.OrderedText;
 import net.minecraft.text.Text;
 import nrd.breached.Breached;
+import nrd.breached.client.BreachedClient;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -50,6 +52,10 @@ public class BreachedArchiveScreen extends Screen {
                                     "Find a strong location for your base and place a Landlock Block to claim it. Players can’t break or place blocks inside your claim, but they can still get in through any holes you leave behind and steal your stuff!\n" +
                                             "\n" +
                                             "To upgrade your base you’ll also want a Probe and a Reinforcer alongside your Landlock Block. These tools help you configure and strengthen your base protection. You can read more about them here in the Base tab."
+                            ),
+                            new ArchiveSection(
+                                    "Archive",
+                                    "Press B to open the Breached Archive."
                             )
                     )
             ),
@@ -77,19 +83,29 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Claim Control",
-                                    "Use the Probe before building to check claims. IMPORTANT: Probe's allow you to move your claim center. When you sneak-right-click your Landlock with the Probe, then right-click a block inside that claim, you will move the claim center to that block. The new center must be somewhere inside the current 17x17x17 cube.",
-                                    List.of(recipe(
-                                            "probe",
-                                            "Probe",
-                                            stack(Breached.PROBE),
-                                            empty(), stack(Items.IRON_INGOT), empty(),
-                                            empty(), stack(Items.IRON_INGOT), empty(),
-                                            empty(), empty(), empty()
-                                    ))
+                                    "Hold a Probe to see claims you are authorized on. The Diamond Probe also shows enemy claims, making it useful for scouting raids. IMPORTANT: Probes allow you to move your claim center. Sneak-right-click your Landlock with a Probe, then right-click a block inside that claim to move the center there. The new center must stay inside the current 17x17x17 cube.",
+                                    List.of(
+                                            recipe(
+                                                    "probe",
+                                                    "Probe",
+                                                    stack(Breached.PROBE),
+                                                    empty(), stack(Items.IRON_INGOT), empty(),
+                                                    empty(), stack(Items.IRON_INGOT), empty(),
+                                                    empty(), empty(), empty()
+                                            ),
+                                            recipe(
+                                                    "diamond_probe",
+                                                    "Diamond Probe",
+                                                    stack(Breached.DIAMOND_PROBE),
+                                                    empty(), stack(Items.DIAMOND), empty(),
+                                                    stack(Items.DIAMOND), stack(Breached.PROBE), stack(Items.DIAMOND),
+                                                    empty(), stack(Items.DIAMOND), empty()
+                                            )
+                                    )
                             ),
                             new ArchiveSection(
                                     "Reinforcing Land",
-                                    "Claims stop casual griefing, but you'll need reinforcements to defend your base against a breacher! Hold a Reinforcer in your main hand and material in your offhand, then right-click authorized blocks. Wood reinforcement costs 16 logs, iron costs 4 iron blocks, and diamond costs 2 diamond blocks.",
+                                    "Claims stop casual griefing, but you'll need reinforcements to defend your base against a breacher! Hold a Reinforcer in your main hand and material in your offhand, then right-click authorized blocks. Wood costs 16 logs, iron costs 4 iron blocks, diamond costs 2 diamond blocks, and netherite costs 1 netherite ingot.",
                                     List.of(recipe(
                                             "reinforcer",
                                             "Reinforcer",
@@ -145,7 +161,7 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Reinforced Blocks",
-                                    "Reinforcement is what makes walls expensive to break. Wood costs 16 Breacher durability, iron costs 64, and diamond costs 256."
+                                    "Reinforcement is what makes walls expensive to break. Wood costs 16 Breacher durability, iron costs 64, diamond costs 256, and netherite costs 1024."
                             ),
                             new ArchiveSection(
                                     "Failed Breaches",
@@ -191,7 +207,7 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Tier 3",
-                                    "The Netherite Crafting Table is late-game power. Build it with six netherite ingots, then use it to craft the strongest progression recipes.",
+                                    "The Netherite Crafting Table is late-game power. Build it with six netherite ingots, then use it to craft the strongest progression recipes, including anvils.",
                                     List.of(recipe(
                                             "tier_3_crafting_bench",
                                             "Netherite Crafting Table",
@@ -227,7 +243,9 @@ public class BreachedArchiveScreen extends Screen {
                     List.of(
                             new ArchiveSection(
                                     "Beds",
-                                    "Beds are for recovery, not skipping danger, so they don't skip night. You can have three beds at a time, one as a primary and two fallbacks."
+                                    "Beds are for recovery, not skipping danger, so they don't skip night. You can save up to three beds. When you die, the Breached Map opens so you can choose where to respawn.\n" +
+                                            "\n" +
+                                            "Press M to open the Breached Map while alive."
                             ),
                             new ArchiveSection(
                                     "Dimensions",
@@ -264,12 +282,18 @@ public class BreachedArchiveScreen extends Screen {
     private final List<ButtonWidget> tabButtons = new ArrayList<>();
     private final List<RecipeToggleBounds> visibleRecipeToggles = new ArrayList<>();
     private final Set<String> openRecipes = new HashSet<>();
+    private final Screen parentScreen;
     private int activePage;
     private int scrollOffset;
     private int maxScroll;
 
     public BreachedArchiveScreen() {
+        this(null);
+    }
+
+    public BreachedArchiveScreen(Screen parentScreen) {
         super(Text.literal("Breached Archive"));
+        this.parentScreen = parentScreen;
     }
 
     @Override
@@ -344,8 +368,29 @@ public class BreachedArchiveScreen extends Screen {
     }
 
     @Override
+    public boolean keyPressed(KeyInput input) {
+        if (BreachedClient.matchesOpenBreachedArchiveKey(input)) {
+            BreachedClient.suppressArchiveKeyOpenUntilReleased();
+            close();
+            return true;
+        }
+
+        return super.keyPressed(input);
+    }
+
+    @Override
     public boolean shouldPause() {
         return false;
+    }
+
+    @Override
+    public void close() {
+        if (client != null && parentScreen != null) {
+            client.setScreen(parentScreen);
+            return;
+        }
+
+        super.close();
     }
 
     private void renderPageContent(

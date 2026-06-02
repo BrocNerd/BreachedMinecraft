@@ -56,6 +56,7 @@ import nrd.breached.item.BreacherItem;
 import nrd.breached.landlock.LandlockClaimManager;
 import nrd.breached.landlock.LandlockMapState;
 import nrd.breached.map.BreachedMapSnapshotManager;
+import nrd.breached.network.LandlockClaimOutlinePayload;
 import nrd.breached.network.OpenBreachedArchivePayload;
 import nrd.breached.network.OpenBreachedMapPayload;
 import nrd.breached.network.ReinforcementOutlinePayload;
@@ -82,11 +83,14 @@ import java.util.function.Function;
 
 public class Breached implements ModInitializer {
     public static final String MOD_ID = "breached";
+    private static final String ARCHIVE_STARTER_ITEM_GIVEN_TAG = MOD_ID + ".archive_starter_item_given";
     private static final int REINFORCEMENT_OUTLINE_RADIUS = 16;
+    private static final int LANDLOCK_CLAIM_OUTLINE_RADIUS = 64;
     private static final int REINFORCEMENT_OUTLINE_SYNC_INTERVAL_TICKS = 5;
     private static final Map<UUID, Long> LAST_VILLAGER_TRADE_MESSAGE_TICKS = new HashMap<>();
     private static final Map<UUID, ProbeLandlockSelection> PROBE_LANDLOCK_SELECTIONS = new HashMap<>();
     private static final Map<UUID, ReinforcementOutlineTarget> REINFORCEMENT_OUTLINE_TARGETS = new HashMap<>();
+    private static final Map<UUID, LandlockClaimOutlineTarget> LANDLOCK_CLAIM_OUTLINE_TARGETS = new HashMap<>();
     private static final int BREACHED_MAP_TEAMMATE_COLOR = 0xFF5AE6FF;
     private static final int BREACHED_MAP_LANDLOCK_COLOR = 0xFF7CFF8A;
     private static final int BREACHED_MAP_BED_COLOR = 0xFF39FF14;
@@ -149,6 +153,12 @@ public class Breached implements ModInitializer {
             new Item.Settings()
     );
 
+    public static final Item DIAMOND_PROBE = registerItem(
+            "diamond_probe",
+            Item::new,
+            new Item.Settings()
+    );
+
     public static final Item REINFORCER = registerItem(
             "reinforcer",
             Item::new,
@@ -190,6 +200,7 @@ public class Breached implements ModInitializer {
     public void onInitialize() {
         BreachedConfig.load();
         PayloadTypeRegistry.playS2C().register(ReinforcementOutlinePayload.ID, ReinforcementOutlinePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(LandlockClaimOutlinePayload.ID, LandlockClaimOutlinePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(OpenBreachedArchivePayload.ID, OpenBreachedArchivePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(OpenBreachedMapPayload.ID, OpenBreachedMapPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(RequestBreachedMapPayload.ID, RequestBreachedMapPayload.CODEC);
@@ -228,6 +239,7 @@ public class Breached implements ModInitializer {
             entries.add(DIAMOND_BREACHER);
             entries.add(NETHERITE_BREACHER);
             entries.add(PROBE);
+            entries.add(DIAMOND_PROBE);
             entries.add(REINFORCER);
             entries.add(BREACHED_ARCHIVE);
         });
@@ -240,7 +252,7 @@ public class Breached implements ModInitializer {
 
     private static void registerStarterItemEvents() {
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-            giveArchiveIfMissing(handler.player);
+            giveArchiveOnce(handler.player);
         });
     }
 
@@ -411,12 +423,16 @@ public class Breached implements ModInitializer {
                 .toList();
     }
 
-    private static void giveArchiveIfMissing(ServerPlayerEntity player) {
-        if (hasArchive(player)) {
+    private static void giveArchiveOnce(ServerPlayerEntity player) {
+        if (player.getCommandTags().contains(ARCHIVE_STARTER_ITEM_GIVEN_TAG)) {
             return;
         }
 
-        player.giveOrDropStack(new ItemStack(BREACHED_ARCHIVE));
+        if (!hasArchive(player)) {
+            player.giveOrDropStack(new ItemStack(BREACHED_ARCHIVE));
+        }
+
+        player.addCommandTag(ARCHIVE_STARTER_ITEM_GIVEN_TAG);
     }
 
     private static boolean hasArchive(ServerPlayerEntity player) {
@@ -604,8 +620,11 @@ public class Breached implements ModInitializer {
     }
 
     private static void registerReinforcementOutlineSync() {
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
-                REINFORCEMENT_OUTLINE_TARGETS.remove(handler.player.getUuid()));
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            UUID playerId = handler.player.getUuid();
+            REINFORCEMENT_OUTLINE_TARGETS.remove(playerId);
+            LANDLOCK_CLAIM_OUTLINE_TARGETS.remove(playerId);
+        });
 
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (server.getTicks() % REINFORCEMENT_OUTLINE_SYNC_INTERVAL_TICKS != 0) {
@@ -614,6 +633,7 @@ public class Breached implements ModInitializer {
 
             for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
                 syncReinforcementOutlineTargets(player);
+                syncLandlockClaimOutlineTargets(player);
             }
         });
     }
@@ -652,6 +672,47 @@ public class Breached implements ModInitializer {
         return stack.isOf(REINFORCER) || stack.getItem() instanceof BreacherItem;
     }
 
+    private static void syncLandlockClaimOutlineTargets(ServerPlayerEntity player) {
+        if (!ServerPlayNetworking.canSend(player, LandlockClaimOutlinePayload.ID)) {
+            LANDLOCK_CLAIM_OUTLINE_TARGETS.remove(player.getUuid());
+            return;
+        }
+
+        ItemStack mainHandStack = player.getMainHandStack();
+        if (!isClaimOutlineProbe(mainHandStack)) {
+            sendLandlockClaimOutlineTargets(player, LandlockClaimOutlineTarget.empty());
+            return;
+        }
+
+        boolean includeUnauthorized = mainHandStack.isOf(DIAMOND_PROBE);
+        List<LandlockClaimOutlinePayload.Entry> entries = new ArrayList<>();
+        LandlockClaimManager.forEachLoadedLandlockWithin(
+                player.getEntityWorld(),
+                player.getBlockPos(),
+                LANDLOCK_CLAIM_OUTLINE_RADIUS,
+                (landlockPos, landlock) -> {
+                    boolean authorized = landlock.isAuthorized(player.getUuid());
+                    if (authorized || includeUnauthorized) {
+                        entries.add(new LandlockClaimOutlinePayload.Entry(landlock.getClaimCenter().toImmutable(), authorized));
+                    }
+                }
+        );
+
+        List<LandlockClaimOutlinePayload.Entry> sortedEntries = entries.stream()
+                .sorted(Comparator
+                        .comparingInt((LandlockClaimOutlinePayload.Entry entry) -> squaredDistance(entry.claimCenter(), player.getBlockPos()))
+                        .thenComparingInt(entry -> entry.claimCenter().getX())
+                        .thenComparingInt(entry -> entry.claimCenter().getY())
+                        .thenComparingInt(entry -> entry.claimCenter().getZ()))
+                .toList();
+
+        sendLandlockClaimOutlineTargets(player, new LandlockClaimOutlineTarget(sortedEntries));
+    }
+
+    private static boolean isClaimOutlineProbe(ItemStack stack) {
+        return stack.isOf(PROBE) || stack.isOf(DIAMOND_PROBE);
+    }
+
     private static void sendReinforcementOutlineTargets(ServerPlayerEntity player, ReinforcementOutlineTarget target) {
         UUID playerId = player.getUuid();
         ReinforcementOutlineTarget currentTarget = REINFORCEMENT_OUTLINE_TARGETS.get(playerId);
@@ -671,6 +732,27 @@ public class Breached implements ModInitializer {
 
         ServerPlayNetworking.send(player, new ReinforcementOutlinePayload(target.entries()));
         REINFORCEMENT_OUTLINE_TARGETS.put(playerId, target);
+    }
+
+    private static void sendLandlockClaimOutlineTargets(ServerPlayerEntity player, LandlockClaimOutlineTarget target) {
+        UUID playerId = player.getUuid();
+        LandlockClaimOutlineTarget currentTarget = LANDLOCK_CLAIM_OUTLINE_TARGETS.get(playerId);
+        if (currentTarget == null && target.isEmpty()) {
+            return;
+        }
+
+        if (target.equals(currentTarget)) {
+            return;
+        }
+
+        if (target.isEmpty()) {
+            ServerPlayNetworking.send(player, LandlockClaimOutlinePayload.empty());
+            LANDLOCK_CLAIM_OUTLINE_TARGETS.remove(playerId);
+            return;
+        }
+
+        ServerPlayNetworking.send(player, new LandlockClaimOutlinePayload(target.entries()));
+        LANDLOCK_CLAIM_OUTLINE_TARGETS.put(playerId, target);
     }
 
     private static int squaredDistance(BlockPos pos, BlockPos center) {
@@ -772,7 +854,7 @@ public class Breached implements ModInitializer {
 
     private static void registerLandlockDebugEvents() {
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
-            if (world.isClient() || hand != Hand.MAIN_HAND || !player.getMainHandStack().isOf(PROBE)) {
+            if (world.isClient() || hand != Hand.MAIN_HAND || !isClaimOutlineProbe(player.getMainHandStack())) {
                 return ActionResult.PASS;
             }
 
@@ -865,6 +947,20 @@ public class Breached implements ModInitializer {
 
         private static ReinforcementOutlineTarget empty() {
             return new ReinforcementOutlineTarget(List.of());
+        }
+
+        private boolean isEmpty() {
+            return entries.isEmpty();
+        }
+    }
+
+    private record LandlockClaimOutlineTarget(List<LandlockClaimOutlinePayload.Entry> entries) {
+        private LandlockClaimOutlineTarget {
+            entries = List.copyOf(entries);
+        }
+
+        private static LandlockClaimOutlineTarget empty() {
+            return new LandlockClaimOutlineTarget(List.of());
         }
 
         private boolean isEmpty() {

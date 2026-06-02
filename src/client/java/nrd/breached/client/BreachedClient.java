@@ -1,5 +1,8 @@
 package nrd.breached.client;
 
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.platform.DepthTestFunction;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
@@ -7,14 +10,17 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.block.BlockState;
+import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.gui.screen.DeathScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.client.render.RenderLayers;
+import net.minecraft.client.render.RenderSetup;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexRendering;
 import net.minecraft.client.render.state.OutlineRenderState;
@@ -25,10 +31,12 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ColorHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
+import net.minecraft.util.shape.VoxelShapes;
 import nrd.breached.Breached;
 import nrd.breached.client.screen.BreachedArchiveScreen;
 import nrd.breached.client.screen.BreachedMapScreen;
 import nrd.breached.item.BreacherItem;
+import nrd.breached.network.LandlockClaimOutlinePayload;
 import nrd.breached.network.OpenBreachedArchivePayload;
 import nrd.breached.network.OpenBreachedMapPayload;
 import nrd.breached.network.ReinforcementOutlinePayload;
@@ -45,20 +53,40 @@ import java.util.stream.Collectors;
 
 public class BreachedClient implements ClientModInitializer {
     private static List<ReinforcementOutlineTarget> outlineTargets = List.of();
+    private static List<LandlockClaimOutlineTarget> claimOutlineTargets = List.of();
+    private static final VoxelShape LANDLOCK_CLAIM_OUTLINE_SHAPE = VoxelShapes.cuboid(0.0D, 0.0D, 0.0D, 17.0D, 17.0D, 17.0D);
+    private static final RenderPipeline LANDLOCK_CLAIM_OUTLINE_PIPELINE = RenderPipelines.register(RenderPipeline.builder(RenderPipelines.RENDERTYPE_LINES_SNIPPET)
+            .withLocation(Identifier.of(Breached.MOD_ID, "landlock_claim_outline"))
+            .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+            .withBlend(BlendFunction.TRANSLUCENT)
+            .withDepthWrite(false)
+            .withVertexFormat(RenderPipelines.LINES.getVertexFormat(), RenderPipelines.LINES.getVertexFormatMode())
+            .build());
+    private static final RenderLayer LANDLOCK_CLAIM_OUTLINE_LAYER = RenderLayer.of(
+            "breached_landlock_claim_outline",
+            RenderSetup.builder(LANDLOCK_CLAIM_OUTLINE_PIPELINE)
+                    .translucent()
+                    .expectedBufferSize(1536)
+                    .build()
+    );
     private static final KeyBinding.Category BREACHED_KEY_CATEGORY = KeyBinding.Category.create(Identifier.of(Breached.MOD_ID, "breached"));
     private static Screen pendingBreachedMapParentScreen;
     private static boolean pendingBreachedMapRespawnOnBedSelect;
     private static boolean suppressMapKeyOpenUntilReleased;
+    private static boolean suppressArchiveKeyOpenUntilReleased;
     private static KeyBinding openBreachedMapKeyBinding;
+    private static KeyBinding openBreachedArchiveKeyBinding;
 
     @Override
     public void onInitializeClient() {
         registerBreachedMapKeyBinding();
+        registerBreachedArchiveKeyBinding();
         registerArchiveReceiver();
         registerBreachedMapReceiver();
         registerReinforcementOutlineReceiver();
+        registerLandlockClaimOutlineReceiver();
         registerReinforcementOutlineRenderer();
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> clearReinforcementOutlines());
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> clearOutlines());
     }
 
     private static void registerArchiveReceiver() {
@@ -94,6 +122,19 @@ public class BreachedClient implements ClientModInitializer {
         ClientPlayNetworking.send(RequestBreachedMapPayload.INSTANCE);
     }
 
+    public static void openBreachedArchive() {
+        openBreachedArchive(MinecraftClient.getInstance().currentScreen);
+    }
+
+    public static void openBreachedArchive(Screen parentScreen) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player == null || client.world == null) {
+            return;
+        }
+
+        client.setScreen(new BreachedArchiveScreen(parentScreen));
+    }
+
     public static void requestBedRespawn(int bedIndex) {
         ClientPlayNetworking.send(new SelectRespawnBedPayload(bedIndex));
         MinecraftClient client = MinecraftClient.getInstance();
@@ -114,8 +155,16 @@ public class BreachedClient implements ClientModInitializer {
         return openBreachedMapKeyBinding != null && openBreachedMapKeyBinding.matchesKey(input);
     }
 
+    public static boolean matchesOpenBreachedArchiveKey(KeyInput input) {
+        return openBreachedArchiveKeyBinding != null && openBreachedArchiveKeyBinding.matchesKey(input);
+    }
+
     public static void suppressMapKeyOpenUntilReleased() {
         suppressMapKeyOpenUntilReleased = true;
+    }
+
+    public static void suppressArchiveKeyOpenUntilReleased() {
+        suppressArchiveKeyOpenUntilReleased = true;
     }
 
     private static void registerBreachedMapKeyBinding() {
@@ -149,6 +198,35 @@ public class BreachedClient implements ClientModInitializer {
         });
     }
 
+    private static void registerBreachedArchiveKeyBinding() {
+        openBreachedArchiveKeyBinding = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.breached.open_archive",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_B,
+                BREACHED_KEY_CATEGORY
+        ));
+
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (suppressArchiveKeyOpenUntilReleased && !openBreachedArchiveKeyBinding.isPressed()) {
+                suppressArchiveKeyOpenUntilReleased = false;
+            }
+
+            while (openBreachedArchiveKeyBinding.wasPressed()) {
+                if (suppressArchiveKeyOpenUntilReleased) {
+                    continue;
+                }
+
+                if (client.player == null || client.world == null) {
+                    continue;
+                }
+
+                if (client.currentScreen == null) {
+                    openBreachedArchive(null);
+                }
+            }
+        });
+    }
+
     private static void registerReinforcementOutlineReceiver() {
         ClientPlayNetworking.registerGlobalReceiver(ReinforcementOutlinePayload.ID, (payload, context) -> {
             outlineTargets = payload.entries()
@@ -161,8 +239,17 @@ public class BreachedClient implements ClientModInitializer {
         });
     }
 
-    private static void clearReinforcementOutlines() {
+    private static void registerLandlockClaimOutlineReceiver() {
+        ClientPlayNetworking.registerGlobalReceiver(LandlockClaimOutlinePayload.ID, (payload, context) ->
+                claimOutlineTargets = payload.entries()
+                        .stream()
+                        .map(entry -> new LandlockClaimOutlineTarget(entry.claimCenter().toImmutable(), entry.authorized()))
+                        .toList());
+    }
+
+    private static void clearOutlines() {
         outlineTargets = List.of();
+        claimOutlineTargets = List.of();
         ReinforcementVisibilityCache.clear();
     }
 
@@ -177,14 +264,36 @@ public class BreachedClient implements ClientModInitializer {
 
         WorldRenderEvents.BEFORE_DEBUG_RENDER.register(context -> {
             MinecraftClient client = MinecraftClient.getInstance();
-            if (client.player == null || client.world == null || outlineTargets.isEmpty() || !isReinforcementOutlineTool(client.player.getMainHandStack())) {
+            if (client.player == null || client.world == null) {
                 return;
             }
 
-            VertexConsumer consumer = context.consumers().getBuffer(RenderLayers.lines());
+            ItemStack mainHandStack = client.player.getMainHandStack();
+            boolean renderReinforcements = !outlineTargets.isEmpty() && isReinforcementOutlineTool(mainHandStack);
+            boolean renderClaims = !claimOutlineTargets.isEmpty() && isClaimOutlineProbe(mainHandStack);
+            if (!renderReinforcements && !renderClaims) {
+                return;
+            }
+
+            var consumers = context.consumers();
+            if (consumers == null) {
+                return;
+            }
+
             Vec3d cameraPos = context.worldState().cameraRenderState.pos;
-            for (ReinforcementOutlineTarget target : outlineTargets) {
-                renderReinforcementOutline(context.matrices(), consumer, cameraPos, client.world, target);
+
+            if (renderReinforcements) {
+                VertexConsumer reinforcementConsumer = consumers.getBuffer(RenderLayers.lines());
+                for (ReinforcementOutlineTarget target : outlineTargets) {
+                    renderReinforcementOutline(context.matrices(), reinforcementConsumer, cameraPos, client.world, target);
+                }
+            }
+
+            if (renderClaims) {
+                VertexConsumer hiddenClaimConsumer = consumers.getBuffer(LANDLOCK_CLAIM_OUTLINE_LAYER);
+                for (LandlockClaimOutlineTarget target : claimOutlineTargets) {
+                    renderLandlockClaimOutline(context.matrices(), hiddenClaimConsumer, cameraPos, target, 0.8F, 1.75F);
+                }
             }
         });
     }
@@ -205,6 +314,10 @@ public class BreachedClient implements ClientModInitializer {
 
     private static boolean isReinforcementOutlineTool(ItemStack stack) {
         return stack.isOf(Breached.REINFORCER) || stack.getItem() instanceof BreacherItem;
+    }
+
+    private static boolean isClaimOutlineProbe(ItemStack stack) {
+        return stack.isOf(Breached.PROBE) || stack.isOf(Breached.DIAMOND_PROBE);
     }
 
     private static void renderReinforcementOutline(MatrixStack matrices, VertexConsumer consumer, Vec3d cameraPos, ClientWorld world, ReinforcementOutlineTarget target) {
@@ -237,9 +350,33 @@ public class BreachedClient implements ClientModInitializer {
             case WOOD -> ColorHelper.fromFloats(0.95F, 0.76F, 0.48F, 0.22F);
             case IRON -> ColorHelper.fromFloats(0.95F, 0.86F, 0.88F, 0.90F);
             case DIAMOND -> ColorHelper.fromFloats(0.95F, 0.16F, 0.78F, 1.0F);
+            case NETHERITE -> ColorHelper.fromFloats(0.95F, 0.38F, 0.22F, 0.30F);
         };
     }
 
+    private static void renderLandlockClaimOutline(
+            MatrixStack matrices,
+            VertexConsumer consumer,
+            Vec3d cameraPos,
+            LandlockClaimOutlineTarget target,
+            float alpha,
+            float lineWidthMultiplier
+    ) {
+        BlockPos center = target.claimCenter();
+        double minX = center.getX() - 8 - cameraPos.x;
+        double minY = center.getY() - 8 - cameraPos.y;
+        double minZ = center.getZ() - 8 - cameraPos.z;
+        int color = target.authorized()
+                ? ColorHelper.fromFloats(alpha, 0.22F, 1.0F, 0.42F)
+                : ColorHelper.fromFloats(alpha, 1.0F, 0.28F, 0.22F);
+        float lineWidth = MinecraftClient.getInstance().getWindow().getMinimumLineWidth() * lineWidthMultiplier;
+
+        VertexRendering.drawOutline(matrices, consumer, LANDLOCK_CLAIM_OUTLINE_SHAPE, minX, minY, minZ, color, lineWidth);
+    }
+
     private record ReinforcementOutlineTarget(BlockPos pos, ReinforcementTier tier) {
+    }
+
+    private record LandlockClaimOutlineTarget(BlockPos claimCenter, boolean authorized) {
     }
 }

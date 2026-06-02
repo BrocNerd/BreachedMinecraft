@@ -34,12 +34,14 @@ public final class CraftingTierRules {
                 Items.ENCHANTING_TABLE,
                 Items.BREWING_STAND,
                 Items.GOLDEN_APPLE,
-                Breached.DIAMOND_BREACHER
+                Breached.DIAMOND_BREACHER,
+                Breached.DIAMOND_PROBE
         );
 
         require(CraftingTier.TIER_3,
                 Items.BOOKSHELF,
                 Items.CHISELED_BOOKSHELF,
+                Items.ANVIL, Items.CHIPPED_ANVIL, Items.DAMAGED_ANVIL,
                 Items.NETHERITE_SWORD, Items.NETHERITE_SHOVEL, Items.NETHERITE_PICKAXE, Items.NETHERITE_AXE, Items.NETHERITE_HOE,
                 Items.NETHERITE_HELMET, Items.NETHERITE_CHESTPLATE, Items.NETHERITE_LEGGINGS, Items.NETHERITE_BOOTS,
                 Items.NETHERITE_SPEAR,
