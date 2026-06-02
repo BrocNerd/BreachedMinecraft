@@ -41,7 +41,7 @@ public final class LandlockClaimManager {
         }
 
         LandlockCounter counter = new LandlockCounter(playerUuid);
-        forEachLoadedLandlock(serverWorld, counter::count);
+        visitLoadedLandlocks(serverWorld, counter::count);
         return counter.count;
     }
 
@@ -50,7 +50,7 @@ public final class LandlockClaimManager {
             return false;
         }
 
-        return forEachLoadedLandlock(serverWorld, (landlockPos, landlock) -> isTooCloseToLandlock(landlockPos, newLandlockPos));
+        return visitLoadedLandlocks(serverWorld, (landlockPos, landlock) -> isTooCloseToLandlock(landlockPos, newLandlockPos));
     }
 
     public static void forEachLoadedLandlockWithin(World world, BlockPos center, int radius, BiConsumer<BlockPos, LandlockBlockEntity> consumer) {
@@ -79,13 +79,24 @@ public final class LandlockClaimManager {
         }
     }
 
+    public static void forEachLoadedLandlock(World world, BiConsumer<BlockPos, LandlockBlockEntity> consumer) {
+        if (!(world instanceof ServerWorld serverWorld)) {
+            return;
+        }
+
+        visitLoadedLandlocks(serverWorld, (landlockPos, landlock) -> {
+            consumer.accept(landlockPos, landlock);
+            return false;
+        });
+    }
+
     private static LandlockBlockEntity findClaimingLandlock(World world, BlockPos pos) {
         if (!(world instanceof ServerWorld serverWorld)) {
             return null;
         }
 
         ClaimingLandlockFinder finder = new ClaimingLandlockFinder(pos);
-        forEachLoadedLandlock(serverWorld, finder::find);
+        visitLoadedLandlocks(serverWorld, finder::find);
         return finder.landlock;
     }
 
@@ -120,7 +131,7 @@ public final class LandlockClaimManager {
                 && dx * dx + dy * dy + dz * dz <= radius * radius;
     }
 
-    private static boolean forEachLoadedLandlock(ServerWorld world, LandlockVisitor visitor) {
+    private static boolean visitLoadedLandlocks(ServerWorld world, LandlockVisitor visitor) {
         boolean[] stopped = {false};
         world.getChunkManager().chunkLoadingManager.forEachChunk(chunk -> {
             if (stopped[0]) {

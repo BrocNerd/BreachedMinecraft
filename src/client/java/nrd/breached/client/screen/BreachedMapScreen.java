@@ -24,26 +24,46 @@ public class BreachedMapScreen extends Screen {
     private static final int TEXT_COLOR = 0xFFE8F3FA;
     private static final int MUTED_TEXT_COLOR = 0xFF9FB8C6;
     private static final int PLAYER_COLOR = 0xFFFFD34D;
+    private static final int UNAVAILABLE_BED_COLOR = 0xFF747C83;
+    private static final int UNAVAILABLE_BED_TEXT_COLOR = 0xFF929A9F;
     private static final int CLOSE_HOVER_COLOR = 0xFFB94A4A;
+    private static final int REFRESH_HOVER_COLOR = 0xFF2F6C87;
     private static final int CLOSE_TEXT_COLOR = 0xFFFFEFEF;
     private static final int CLOSE_BUTTON_SIZE = 16;
+    private static final int REFRESH_BUTTON_SIZE = 16;
+    private static final int TOWNHALL_BUTTON_WIDTH = 124;
+    private static final int TOWNHALL_BUTTON_HEIGHT = 20;
+    private static final int TOWNHALL_BUTTON_COLOR = 0xFF1E5E7A;
+    private static final int TOWNHALL_BUTTON_HOVER_COLOR = 0xFF27799E;
+    private static final int TOWNHALL_BUTTON_BORDER_COLOR = 0xFFC6E8F8;
+    private static final int BED_LIST_HOVER_COLOR = 0x3339FF14;
+    private static final int BED_LIST_ROW_HEIGHT = 11;
     private static final float PLAYER_LABEL_SCALE = 0.75F;
+    private static final float BED_LABEL_SCALE = 0.75F;
+    private static final float DEATH_LABEL_SCALE = 0.5F;
     private static final double MIN_ZOOM = 1.0D;
     private static final double MAX_ZOOM = 8.0D;
     private static int nextTerrainTextureId;
 
     private final OpenBreachedMapPayload payload;
     private final Screen parentScreen;
+    private final boolean respawnOnBedSelect;
     private final Identifier terrainTextureId;
     private NativeImageBackedTexture terrainTexture;
     private double zoom = MIN_ZOOM;
     private double viewCenterX;
     private double viewCenterZ;
+    private final long openedAtMillis = System.currentTimeMillis();
 
     public BreachedMapScreen(OpenBreachedMapPayload payload, Screen parentScreen) {
-        super(Text.literal("Breached Map"));
+        this(payload, parentScreen, false);
+    }
+
+    public BreachedMapScreen(OpenBreachedMapPayload payload, Screen parentScreen, boolean respawnOnBedSelect) {
+        super(Text.literal(respawnOnBedSelect ? "Choose Respawn Bed" : "Breached Map"));
         this.payload = payload;
         this.parentScreen = parentScreen;
+        this.respawnOnBedSelect = respawnOnBedSelect;
         this.terrainTextureId = Identifier.of(Breached.MOD_ID, "dynamic/breached_map/" + nextTerrainTextureId++);
         createTerrainTexture();
     }
@@ -57,23 +77,18 @@ public class BreachedMapScreen extends Screen {
 
         context.fill(0, 0, width, height, BACKDROP_COLOR);
         context.drawTextWithShadow(textRenderer, title, mapLeft, titleY, TEXT_COLOR);
+        renderRefreshIcon(context, mouseX, mouseY);
         renderCloseIcon(context, mouseX, mouseY);
         context.drawTextWithShadow(
                 textRenderer,
-                Text.literal("Zoom: " + (int) Math.round(zoom * 100.0D) + "%"),
+                getCoordinateText(),
                 mapLeft,
                 titleY + 12,
                 MUTED_TEXT_COLOR
         );
 
         renderMap(context, mapLeft, mapTop, mapSize);
-        context.drawTextWithShadow(
-                textRenderer,
-                Text.literal("You: X " + payload.playerX() + "  Z " + payload.playerZ()),
-                mapLeft,
-                mapTop + mapSize + 8,
-                MUTED_TEXT_COLOR
-        );
+        renderTownhallRespawnButton(context, mouseX, mouseY);
 
         super.render(context, mouseX, mouseY, deltaTicks);
     }
@@ -85,7 +100,31 @@ public class BreachedMapScreen extends Screen {
             return true;
         }
 
+        if (click.button() == 0 && isInsideRefreshButton(click.x(), click.y())) {
+            BreachedClient.refreshBreachedMap(parentScreen, respawnOnBedSelect);
+            return true;
+        }
+
+        if (click.button() == 0 && isInsideTownhallRespawnButton(click.x(), click.y())) {
+            BreachedClient.requestTownhallRespawn();
+            return true;
+        }
+
+        if (click.button() == 0 && respawnOnBedSelect) {
+            int clickedBedListIndex = getClickedBedListIndex(click.x(), click.y());
+            if (clickedBedListIndex >= 0) {
+                requestBedRespawn(clickedBedListIndex);
+                return true;
+            }
+        }
+
         if (click.button() == 0 && isInsideMap(click.x(), click.y())) {
+            if (respawnOnBedSelect) {
+                int clickedBedIndex = getClickedBedIndex(click.x(), click.y());
+                if (clickedBedIndex >= 0) {
+                    requestBedRespawn(clickedBedIndex);
+                }
+            }
             return true;
         }
 
@@ -132,6 +171,7 @@ public class BreachedMapScreen extends Screen {
     @Override
     public boolean keyPressed(KeyInput input) {
         if (BreachedClient.matchesOpenBreachedMapKey(input)) {
+            BreachedClient.suppressMapKeyOpenUntilReleased();
             close();
             return true;
         }
@@ -177,6 +217,92 @@ public class BreachedMapScreen extends Screen {
         );
     }
 
+    private void renderRefreshIcon(DrawContext context, int mouseX, int mouseY) {
+        int refreshLeft = refreshButtonLeft();
+        int refreshTop = refreshButtonTop();
+        boolean hovered = isInsideRefreshButton(mouseX, mouseY);
+        if (hovered) {
+            context.fill(refreshLeft, refreshTop, refreshLeft + REFRESH_BUTTON_SIZE, refreshTop + REFRESH_BUTTON_SIZE, REFRESH_HOVER_COLOR);
+        }
+
+        context.drawStrokedRectangle(refreshLeft, refreshTop, REFRESH_BUTTON_SIZE, REFRESH_BUTTON_SIZE, hovered ? CLOSE_TEXT_COLOR : MAP_BORDER_COLOR);
+        context.drawTextWithShadow(
+                textRenderer,
+                Text.literal("R"),
+                refreshLeft + 5,
+                refreshTop + 4,
+                CLOSE_TEXT_COLOR
+        );
+    }
+
+    private void renderTownhallRespawnButton(DrawContext context, int mouseX, int mouseY) {
+        if (!shouldShowTownhallRespawnButton()) {
+            return;
+        }
+
+        int left = townhallRespawnButtonLeft();
+        int top = townhallRespawnButtonTop();
+        boolean hovered = isInsideTownhallRespawnButton(mouseX, mouseY);
+        context.fill(
+                left,
+                top,
+                left + TOWNHALL_BUTTON_WIDTH,
+                top + TOWNHALL_BUTTON_HEIGHT,
+                hovered ? TOWNHALL_BUTTON_HOVER_COLOR : TOWNHALL_BUTTON_COLOR
+        );
+        context.drawStrokedRectangle(
+                left,
+                top,
+                TOWNHALL_BUTTON_WIDTH,
+                TOWNHALL_BUTTON_HEIGHT,
+                TOWNHALL_BUTTON_BORDER_COLOR
+        );
+
+        Text label = Text.literal("Respawn in Townhall");
+        context.drawTextWithShadow(
+                textRenderer,
+                label,
+                left + (TOWNHALL_BUTTON_WIDTH - textRenderer.getWidth(label)) / 2,
+                top + 6,
+                TEXT_COLOR
+        );
+        renderBedCooldownList(context, left, top + TOWNHALL_BUTTON_HEIGHT + 7, mouseX, mouseY);
+    }
+
+    private void renderBedCooldownList(DrawContext context, int left, int top, int mouseX, int mouseY) {
+        if (payload.beds().isEmpty()) {
+            context.drawTextWithShadow(textRenderer, Text.literal("No saved beds"), left, top, MUTED_TEXT_COLOR);
+            return;
+        }
+
+        for (int index = 0; index < payload.beds().size(); index++) {
+            OpenBreachedMapPayload.Bed bed = payload.beds().get(index);
+            int remainingTicks = getRemainingBedCooldownTicks(bed);
+            String cooldownText = remainingTicks <= 0 ? "available" : formatCooldown(remainingTicks);
+            int rowTop = top + index * BED_LIST_ROW_HEIGHT;
+            boolean bedReady = isBedReady(bed);
+            if (bedReady && isInsideBedListRow(mouseX, mouseY, left, rowTop)) {
+                context.fill(left - 2, rowTop - 1, left + TOWNHALL_BUTTON_WIDTH, rowTop + 10, BED_LIST_HOVER_COLOR);
+            }
+
+            int color = bedReady ? bed.color() : UNAVAILABLE_BED_TEXT_COLOR;
+            context.drawTextWithShadow(
+                    textRenderer,
+                    Text.literal(bed.label() + ": " + cooldownText),
+                    left,
+                    rowTop,
+                    color
+            );
+        }
+    }
+
+    private static String formatCooldown(int remainingTicks) {
+        int seconds = Math.max(1, (remainingTicks + 19) / 20);
+        int minutes = seconds / 60;
+        int secondsPart = seconds % 60;
+        return minutes + ":" + (secondsPart < 10 ? "0" : "") + secondsPart;
+    }
+
     private void renderMap(DrawContext context, int left, int top, int size) {
         context.enableScissor(left, top, left + size, top + size);
         context.fill(left, top, left + size, top + size, MAP_BACKGROUND);
@@ -186,6 +312,9 @@ public class BreachedMapScreen extends Screen {
 
         List<LabelBounds> occupiedBounds = new ArrayList<>();
         renderMarkers(context, left, top, size, occupiedBounds);
+        renderDeathMarkers(context, left, top, size, occupiedBounds);
+        renderLandlocks(context, left, top, size, occupiedBounds);
+        renderBeds(context, left, top, size, occupiedBounds);
         renderTeammates(context, left, top, size, occupiedBounds);
         renderPlayer(context, left, top, size, occupiedBounds);
         context.disableScissor();
@@ -285,6 +414,89 @@ public class BreachedMapScreen extends Screen {
         }
     }
 
+    private void renderDeathMarkers(DrawContext context, int left, int top, int size, List<LabelBounds> occupiedBounds) {
+        for (OpenBreachedMapPayload.DeathMarker deathMarker : payload.deathMarkers()) {
+            if (!isDeathMarkerActive(deathMarker) || !isInsideBorder(deathMarker.x(), deathMarker.z())) {
+                continue;
+            }
+
+            int x = (int) Math.round(worldToScreenX(deathMarker.x(), left, size));
+            int y = (int) Math.round(worldToScreenZ(deathMarker.z(), top, size));
+            if (!isInsideMap(x, y)) {
+                continue;
+            }
+
+            renderDeathMarker(context, x, y, deathMarker.color());
+            occupiedBounds.add(new LabelBounds(x - 4, y - 4, 8, 8));
+
+            int labelWidth = scaledLabelWidth(deathMarker.label(), DEATH_LABEL_SCALE);
+            int labelHeight = scaledLabelHeight(DEATH_LABEL_SCALE);
+            LabelBounds labelBounds = chooseLabelBounds(x, y, labelWidth, labelHeight, left, top, size, occupiedBounds);
+            drawScaledTextWithShadow(context, deathMarker.label(), labelBounds.x(), labelBounds.y(), deathMarker.color(), DEATH_LABEL_SCALE);
+            occupiedBounds.add(labelBounds.expand(2));
+        }
+    }
+
+    private boolean isDeathMarkerActive(OpenBreachedMapPayload.DeathMarker deathMarker) {
+        long markerDurationMillis = deathMarker.remainingTicks() * 50L;
+        return System.currentTimeMillis() - openedAtMillis < markerDurationMillis;
+    }
+
+    private void renderLandlocks(DrawContext context, int left, int top, int size, List<LabelBounds> occupiedBounds) {
+        for (OpenBreachedMapPayload.Landlock landlock : payload.landlocks()) {
+            if (!isInsideBorder(landlock.x(), landlock.z())) {
+                continue;
+            }
+
+            int x = (int) Math.round(worldToScreenX(landlock.x(), left, size));
+            int y = (int) Math.round(worldToScreenZ(landlock.z(), top, size));
+            if (!isInsideMap(x, y)) {
+                continue;
+            }
+
+            renderLandlockMarker(context, x, y, landlock.color());
+            occupiedBounds.add(new LabelBounds(x - 4, y - 4, 8, 8));
+
+            int labelWidth = textRenderer.getWidth(landlock.label());
+            LabelBounds labelBounds = chooseLabelBounds(x, y, labelWidth, left, top, size, occupiedBounds);
+            context.drawTextWithShadow(textRenderer, Text.literal(landlock.label()), labelBounds.x(), labelBounds.y(), landlock.color());
+            occupiedBounds.add(labelBounds.expand(2));
+        }
+    }
+
+    private void renderBeds(DrawContext context, int left, int top, int size, List<LabelBounds> occupiedBounds) {
+        for (int index = 0; index < payload.beds().size(); index++) {
+            OpenBreachedMapPayload.Bed bed = payload.beds().get(index);
+            if (!isInsideBorder(bed.x(), bed.z())) {
+                continue;
+            }
+
+            int x = (int) Math.round(worldToScreenX(bed.x(), left, size));
+            int y = (int) Math.round(worldToScreenZ(bed.z(), top, size));
+            if (!isInsideMap(x, y)) {
+                continue;
+            }
+
+            boolean bedReady = isBedReady(bed);
+            int bedColor = bedReady ? bed.color() : UNAVAILABLE_BED_COLOR;
+            renderBedMarker(context, x, y, bedColor);
+            occupiedBounds.add(new LabelBounds(x - 5, y - 3, 10, 6));
+
+            int labelWidth = scaledLabelWidth(bed.label(), BED_LABEL_SCALE);
+            int labelHeight = scaledLabelHeight(BED_LABEL_SCALE);
+            LabelBounds labelBounds = chooseLabelBounds(x, y, labelWidth, labelHeight, left, top, size, occupiedBounds);
+            drawScaledTextWithShadow(
+                    context,
+                    bed.label(),
+                    labelBounds.x(),
+                    labelBounds.y(),
+                    bedReady ? bed.color() : UNAVAILABLE_BED_TEXT_COLOR,
+                    BED_LABEL_SCALE
+            );
+            occupiedBounds.add(labelBounds.expand(2));
+        }
+    }
+
     private void renderTeammates(DrawContext context, int left, int top, int size, List<LabelBounds> occupiedBounds) {
         for (OpenBreachedMapPayload.Teammate teammate : payload.teammates()) {
             if (!isInsideBorder(teammate.x(), teammate.z())) {
@@ -300,8 +512,8 @@ public class BreachedMapScreen extends Screen {
             renderPlayerMarker(context, x, y, teammate.color());
             occupiedBounds.add(new LabelBounds(x - 7, y - 7, 14, 14));
 
-            int labelWidth = scaledPlayerLabelWidth(teammate.name());
-            int labelHeight = scaledPlayerLabelHeight();
+            int labelWidth = scaledLabelWidth(teammate.name(), PLAYER_LABEL_SCALE);
+            int labelHeight = scaledLabelHeight(PLAYER_LABEL_SCALE);
             LabelBounds labelBounds = chooseLabelBounds(x, y, labelWidth, labelHeight, left, top, size, occupiedBounds);
             drawScaledTextWithShadow(context, teammate.name(), labelBounds.x(), labelBounds.y(), teammate.color(), PLAYER_LABEL_SCALE);
             occupiedBounds.add(labelBounds.expand(2));
@@ -393,22 +605,22 @@ public class BreachedMapScreen extends Screen {
         }
 
         renderPlayerMarker(context, x, y, PLAYER_COLOR);
-        occupiedBounds.add(new LabelBounds(x - 6, y - 6, 12, 12));
+        occupiedBounds.add(new LabelBounds(x - 4, y - 4, 8, 8));
 
         String label = "You";
-        int labelWidth = scaledPlayerLabelWidth(label);
-        int labelHeight = scaledPlayerLabelHeight();
+        int labelWidth = scaledLabelWidth(label, PLAYER_LABEL_SCALE);
+        int labelHeight = scaledLabelHeight(PLAYER_LABEL_SCALE);
         LabelBounds labelBounds = chooseLabelBounds(x, y, labelWidth, labelHeight, left, top, size, occupiedBounds);
         drawScaledTextWithShadow(context, label, labelBounds.x(), labelBounds.y(), PLAYER_COLOR, PLAYER_LABEL_SCALE);
         occupiedBounds.add(labelBounds.expand(2));
     }
 
-    private int scaledPlayerLabelWidth(String label) {
-        return Math.max(1, (int) Math.ceil(textRenderer.getWidth(label) * PLAYER_LABEL_SCALE));
+    private int scaledLabelWidth(String label, float scale) {
+        return Math.max(1, (int) Math.ceil(textRenderer.getWidth(label) * scale));
     }
 
-    private static int scaledPlayerLabelHeight() {
-        return Math.max(1, (int) Math.ceil(10 * PLAYER_LABEL_SCALE));
+    private static int scaledLabelHeight(float scale) {
+        return Math.max(1, (int) Math.ceil(10 * scale));
     }
 
     private void drawScaledTextWithShadow(DrawContext context, String label, int x, int y, int color, float scale) {
@@ -420,8 +632,34 @@ public class BreachedMapScreen extends Screen {
     }
 
     private static void renderPlayerMarker(DrawContext context, int centerX, int centerY, int color) {
-        fillCircle(context, centerX, centerY, 5, 0xFF050505);
-        fillCircle(context, centerX, centerY, 4, color);
+        fillCircle(context, centerX, centerY, 3, 0xFF050505);
+        fillCircle(context, centerX, centerY, 2, color);
+    }
+
+    private static void renderLandlockMarker(DrawContext context, int centerX, int centerY, int color) {
+        fillDiamond(context, centerX, centerY, 6, 0xFF050505);
+        fillDiamond(context, centerX, centerY, 5, color);
+    }
+
+    private static void fillDiamond(DrawContext context, int centerX, int centerY, int radius, int color) {
+        for (int offsetY = -radius; offsetY <= radius; offsetY++) {
+            int offsetX = radius - Math.abs(offsetY);
+            context.fill(centerX - offsetX, centerY + offsetY, centerX + offsetX + 1, centerY + offsetY + 1, color);
+        }
+    }
+
+    private static void renderDeathMarker(DrawContext context, int centerX, int centerY, int color) {
+        context.fill(centerX - 3, centerY - 3, centerX + 4, centerY + 4, 0xFF050505);
+        for (int offset = -2; offset <= 2; offset++) {
+            context.fill(centerX + offset, centerY + offset, centerX + offset + 1, centerY + offset + 1, color);
+            context.fill(centerX + offset, centerY - offset, centerX + offset + 1, centerY - offset + 1, color);
+        }
+    }
+
+    private static void renderBedMarker(DrawContext context, int centerX, int centerY, int color) {
+        context.fill(centerX - 4, centerY - 3, centerX + 5, centerY + 3, 0xFF050505);
+        context.fill(centerX - 3, centerY - 2, centerX + 4, centerY + 2, color);
+        context.fill(centerX - 3, centerY - 2, centerX, centerY + 2, 0xFFFFEFF3);
     }
 
     private static void fillCircle(DrawContext context, int centerX, int centerY, int radius, int color) {
@@ -461,9 +699,76 @@ public class BreachedMapScreen extends Screen {
         return mouseX >= mapLeft && mouseX < mapLeft + mapSize && mouseY >= mapTop && mouseY < mapTop + mapSize;
     }
 
+    private Text getCoordinateText() {
+        return Text.literal("You: X " + payload.playerX() + "  Z " + payload.playerZ());
+    }
+
+    private int getClickedBedListIndex(double mouseX, double mouseY) {
+        if (!shouldShowTownhallRespawnButton() || payload.beds().isEmpty()) {
+            return -1;
+        }
+
+        int left = townhallRespawnButtonLeft();
+        int top = townhallRespawnButtonTop() + TOWNHALL_BUTTON_HEIGHT + 7;
+        for (int index = 0; index < payload.beds().size(); index++) {
+            OpenBreachedMapPayload.Bed bed = payload.beds().get(index);
+            if (!isBedReady(bed)) {
+                continue;
+            }
+
+            int rowTop = top + index * BED_LIST_ROW_HEIGHT;
+            if (isInsideBedListRow(mouseX, mouseY, left, rowTop)) {
+                return bed.bedIndex();
+            }
+        }
+
+        return -1;
+    }
+
+    private int getClickedBedIndex(double mouseX, double mouseY) {
+        int mapLeft = mapLeft();
+        int mapTop = mapTop();
+        int mapSize = mapSize();
+        for (int index = payload.beds().size() - 1; index >= 0; index--) {
+            OpenBreachedMapPayload.Bed bed = payload.beds().get(index);
+            if (!isBedReady(bed) || !isInsideBorder(bed.x(), bed.z())) {
+                continue;
+            }
+
+            int x = (int) Math.round(worldToScreenX(bed.x(), mapLeft, mapSize));
+            int y = (int) Math.round(worldToScreenZ(bed.z(), mapTop, mapSize));
+            if (!isInsideMap(x, y)) {
+                continue;
+            }
+
+            if (mouseX >= x - 7 && mouseX <= x + 7 && mouseY >= y - 6 && mouseY <= y + 6) {
+                return bed.bedIndex();
+            }
+        }
+
+        return -1;
+    }
+
+    private void requestBedRespawn(int bedIndex) {
+        BreachedClient.requestBedRespawn(bedIndex);
+    }
+
     private boolean hasTerrain() {
         int terrainResolution = payload.terrainResolution();
         return terrainResolution > 0 && payload.terrainColors().length >= terrainResolution * terrainResolution * 2;
+    }
+
+    private boolean shouldShowTownhallRespawnButton() {
+        return respawnOnBedSelect;
+    }
+
+    private boolean isBedReady(OpenBreachedMapPayload.Bed bed) {
+        return bed.available() || getRemainingBedCooldownTicks(bed) <= 0;
+    }
+
+    private int getRemainingBedCooldownTicks(OpenBreachedMapPayload.Bed bed) {
+        long elapsedTicks = (System.currentTimeMillis() - openedAtMillis) / 50L;
+        return Math.max(0, bed.cooldownRemainingTicks() - (int) Math.min(Integer.MAX_VALUE, elapsedTicks));
     }
 
     private double viewWorldSize() {
@@ -513,6 +818,56 @@ public class BreachedMapScreen extends Screen {
                 && mouseX < closeLeft + CLOSE_BUTTON_SIZE
                 && mouseY >= closeTop
                 && mouseY < closeTop + CLOSE_BUTTON_SIZE;
+    }
+
+    private int refreshButtonLeft() {
+        return closeButtonLeft() - REFRESH_BUTTON_SIZE - 4;
+    }
+
+    private int refreshButtonTop() {
+        return closeButtonTop();
+    }
+
+    private boolean isInsideRefreshButton(double mouseX, double mouseY) {
+        int refreshLeft = refreshButtonLeft();
+        int refreshTop = refreshButtonTop();
+        return mouseX >= refreshLeft
+                && mouseX < refreshLeft + REFRESH_BUTTON_SIZE
+                && mouseY >= refreshTop
+                && mouseY < refreshTop + REFRESH_BUTTON_SIZE;
+    }
+
+    private int townhallRespawnButtonLeft() {
+        int sideLeft = mapLeft() + mapSize() + 10;
+        if (sideLeft + TOWNHALL_BUTTON_WIDTH <= width - 8) {
+            return sideLeft;
+        }
+
+        return mapLeft() + mapSize() - TOWNHALL_BUTTON_WIDTH - 8;
+    }
+
+    private int townhallRespawnButtonTop() {
+        return mapTop() + 8;
+    }
+
+    private boolean isInsideTownhallRespawnButton(double mouseX, double mouseY) {
+        if (!shouldShowTownhallRespawnButton()) {
+            return false;
+        }
+
+        int left = townhallRespawnButtonLeft();
+        int top = townhallRespawnButtonTop();
+        return mouseX >= left
+                && mouseX < left + TOWNHALL_BUTTON_WIDTH
+                && mouseY >= top
+                && mouseY < top + TOWNHALL_BUTTON_HEIGHT;
+    }
+
+    private static boolean isInsideBedListRow(double mouseX, double mouseY, int left, int rowTop) {
+        return mouseX >= left - 2
+                && mouseX < left + TOWNHALL_BUTTON_WIDTH
+                && mouseY >= rowTop - 1
+                && mouseY < rowTop + BED_LIST_ROW_HEIGHT - 1;
     }
 
     private static int clamp(int value, int min, int max) {

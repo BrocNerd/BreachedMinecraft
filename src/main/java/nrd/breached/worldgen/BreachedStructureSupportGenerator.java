@@ -2,6 +2,7 @@ package nrd.breached.worldgen;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.registry.tag.BlockTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 
@@ -46,7 +47,7 @@ public final class BreachedStructureSupportGenerator {
                 for (int y = origin.getY() - 1; y >= minY; y--) {
                     BlockPos pos = new BlockPos(x, y, z);
                     BlockState currentState = world.getBlockState(pos);
-                    if (!currentState.isOf(Blocks.WATER) && !currentState.isAir()) {
+                    if (!canReplaceWithStructureSupport(currentState)) {
                         break;
                     }
 
@@ -119,7 +120,7 @@ public final class BreachedStructureSupportGenerator {
         for (int y = startPos.getY(); y >= minY; y--) {
             BlockPos pos = new BlockPos(startPos.getX(), y, startPos.getZ());
             BlockState currentState = world.getBlockState(pos);
-            if (!currentState.isOf(Blocks.WATER) && !currentState.isAir()) {
+            if (!canReplaceWithStructureSupport(currentState)) {
                 break;
             }
 
@@ -129,5 +130,23 @@ public final class BreachedStructureSupportGenerator {
         }
 
         return placedBlocks;
+    }
+
+    private static boolean canReplaceWithStructureSupport(BlockState state) {
+        return state.isOf(Blocks.WATER)
+                || state.isAir()
+                || isNaturalSupportObstruction(state);
+    }
+
+    private static boolean isNaturalSupportObstruction(BlockState state) {
+        return state.isIn(BlockTags.LOGS)
+                || state.isIn(BlockTags.LEAVES)
+                || state.isIn(BlockTags.FLOWERS)
+                || state.isOf(Blocks.TALL_GRASS)
+                || state.isOf(Blocks.SHORT_GRASS)
+                || state.isOf(Blocks.FERN)
+                || state.isOf(Blocks.LARGE_FERN)
+                || state.isOf(Blocks.VINE)
+                || state.isOf(Blocks.SNOW);
     }
 }

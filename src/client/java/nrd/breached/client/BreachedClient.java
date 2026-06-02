@@ -9,6 +9,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.gui.screen.DeathScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.math.MatrixStack;
@@ -32,6 +33,8 @@ import nrd.breached.network.OpenBreachedArchivePayload;
 import nrd.breached.network.OpenBreachedMapPayload;
 import nrd.breached.network.ReinforcementOutlinePayload;
 import nrd.breached.network.RequestBreachedMapPayload;
+import nrd.breached.network.RequestTownhallRespawnPayload;
+import nrd.breached.network.SelectRespawnBedPayload;
 import nrd.breached.reinforcement.ReinforcementTier;
 import nrd.breached.reinforcement.ReinforcementVisibilityCache;
 import org.lwjgl.glfw.GLFW;
@@ -44,6 +47,8 @@ public class BreachedClient implements ClientModInitializer {
     private static List<ReinforcementOutlineTarget> outlineTargets = List.of();
     private static final KeyBinding.Category BREACHED_KEY_CATEGORY = KeyBinding.Category.create(Identifier.of(Breached.MOD_ID, "breached"));
     private static Screen pendingBreachedMapParentScreen;
+    private static boolean pendingBreachedMapRespawnOnBedSelect;
+    private static boolean suppressMapKeyOpenUntilReleased;
     private static KeyBinding openBreachedMapKeyBinding;
 
     @Override
@@ -64,18 +69,53 @@ public class BreachedClient implements ClientModInitializer {
     private static void registerBreachedMapReceiver() {
         ClientPlayNetworking.registerGlobalReceiver(OpenBreachedMapPayload.ID, (payload, context) -> {
             Screen parentScreen = pendingBreachedMapParentScreen;
+            boolean respawnOnBedSelect = pendingBreachedMapRespawnOnBedSelect;
             pendingBreachedMapParentScreen = null;
-            context.client().setScreen(new BreachedMapScreen(payload, parentScreen));
+            pendingBreachedMapRespawnOnBedSelect = false;
+            context.client().setScreen(new BreachedMapScreen(payload, parentScreen, respawnOnBedSelect));
         });
     }
 
     public static void requestBreachedMap() {
         pendingBreachedMapParentScreen = MinecraftClient.getInstance().currentScreen;
+        pendingBreachedMapRespawnOnBedSelect = false;
         ClientPlayNetworking.send(RequestBreachedMapPayload.INSTANCE);
+    }
+
+    public static void requestDeathRespawnMap(Screen parentScreen) {
+        pendingBreachedMapParentScreen = parentScreen;
+        pendingBreachedMapRespawnOnBedSelect = true;
+        ClientPlayNetworking.send(RequestBreachedMapPayload.INSTANCE);
+    }
+
+    public static void refreshBreachedMap(Screen parentScreen, boolean respawnOnBedSelect) {
+        pendingBreachedMapParentScreen = parentScreen;
+        pendingBreachedMapRespawnOnBedSelect = respawnOnBedSelect;
+        ClientPlayNetworking.send(RequestBreachedMapPayload.INSTANCE);
+    }
+
+    public static void requestBedRespawn(int bedIndex) {
+        ClientPlayNetworking.send(new SelectRespawnBedPayload(bedIndex));
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player != null) {
+            client.player.requestRespawn();
+        }
+    }
+
+    public static void requestTownhallRespawn() {
+        ClientPlayNetworking.send(RequestTownhallRespawnPayload.INSTANCE);
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player != null) {
+            client.player.requestRespawn();
+        }
     }
 
     public static boolean matchesOpenBreachedMapKey(KeyInput input) {
         return openBreachedMapKeyBinding != null && openBreachedMapKeyBinding.matchesKey(input);
+    }
+
+    public static void suppressMapKeyOpenUntilReleased() {
+        suppressMapKeyOpenUntilReleased = true;
     }
 
     private static void registerBreachedMapKeyBinding() {
@@ -87,9 +127,23 @@ public class BreachedClient implements ClientModInitializer {
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (suppressMapKeyOpenUntilReleased && !openBreachedMapKeyBinding.isPressed()) {
+                suppressMapKeyOpenUntilReleased = false;
+            }
+
             while (openBreachedMapKeyBinding.wasPressed()) {
-                if (client.player != null && client.world != null && client.currentScreen == null) {
+                if (suppressMapKeyOpenUntilReleased) {
+                    continue;
+                }
+
+                if (client.player == null || client.world == null) {
+                    continue;
+                }
+
+                if (client.currentScreen == null) {
                     requestBreachedMap();
+                } else if (client.currentScreen instanceof DeathScreen deathScreen) {
+                    requestDeathRespawnMap(deathScreen);
                 }
             }
         });

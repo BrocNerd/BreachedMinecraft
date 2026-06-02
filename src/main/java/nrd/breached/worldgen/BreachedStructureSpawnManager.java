@@ -3,6 +3,8 @@ package nrd.breached.worldgen;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.Block;
+import net.minecraft.block.enums.BlockHalf;
+import net.minecraft.block.enums.StairShape;
 import net.minecraft.inventory.LootableInventory;
 import net.minecraft.loot.LootTable;
 import net.minecraft.nbt.NbtCompound;
@@ -11,6 +13,7 @@ import net.minecraft.nbt.NbtList;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.state.property.Properties;
 import net.minecraft.structure.StructurePlacementData;
@@ -21,6 +24,7 @@ import net.minecraft.util.BlockRotation;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3i;
 import net.minecraft.util.math.random.Random;
 import net.minecraft.world.Heightmap;
@@ -36,6 +40,9 @@ public final class BreachedStructureSpawnManager {
     public static final BreachedStructureDefinition CENTRAL_SPAWN = BreachedStructureDefinitions.SWORD_STATUE;
     public static final BreachedStructureDefinition OFFICIAL_NETHER_PORTAL = BreachedStructureDefinitions.OFFICIAL_NETHER_PORTAL;
     private static final int BLOCK_UPDATE_FLAGS = 2;
+    private static final int TOWNHALL_STAIRCASE_MAX_EXTENSION = 128;
+    private static final int TOWNHALL_WATER_LANDING_LENGTH = 3;
+    private static final int TOWNHALL_WATER_CATCH_RADIUS = 1;
     private static final List<Block> LOOTABLE_TEMPLATE_BLOCKS = List.of(
             Blocks.CHEST,
             Blocks.TRAPPED_CHEST,
@@ -272,6 +279,8 @@ public final class BreachedStructureSpawnManager {
         NbtCompound templateNbt = template.writeNbt(new NbtCompound());
         removePlacedTemplateWaterlogging(world, templateNbt, pos, placementData);
         applyJigsawAirMarkers(world, templateNbt, pos, placementData);
+        applyTownhallStaircasePlaceholders(world, definition, template, pos, placementData);
+        applyTownhallWaterPlaceholders(world, definition, template, pos, placementData);
         applyTemplateLootTables(world, template, pos, placementData);
 
         BreachedStructurePlacement placement = new BreachedStructurePlacement(
@@ -343,6 +352,42 @@ public final class BreachedStructureSpawnManager {
             BlockRotation rotation
     ) {
         return getTemplateBlocks(world, definition, template, pos, mirror, rotation, true);
+    }
+
+    public static List<TemplatePlacedBlock> getTemplateJigsawAirBlocks(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BlockPos pos,
+            BlockMirror mirror,
+            BlockRotation rotation
+    ) {
+        StructurePlacementData placementData = createPlacementData(definition, mirror, rotation);
+        NbtCompound templateNbt = template.writeNbt(new NbtCompound());
+        Set<Integer> jigsawStateIds = getJigsawStateIds(templateNbt);
+        if (jigsawStateIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<TemplatePlacedBlock> airBlocks = new ArrayList<>();
+        NbtList blocks = templateNbt.getListOrEmpty("blocks");
+        for (int index = 0; index < blocks.size(); index++) {
+            NbtCompound blockNbt = blocks.getCompoundOrEmpty(index);
+            if (!jigsawStateIds.contains(blockNbt.getInt("state", -1))) {
+                continue;
+            }
+
+            NbtList blockPos = blockNbt.getListOrEmpty("pos");
+            BlockPos relativePos = new BlockPos(
+                    blockPos.getInt(0, 0),
+                    blockPos.getInt(1, 0),
+                    blockPos.getInt(2, 0)
+            );
+            BlockPos worldPos = StructureTemplate.transform(placementData, relativePos).add(pos);
+            airBlocks.add(new TemplatePlacedBlock(worldPos, Blocks.AIR.getDefaultState()));
+        }
+
+        return airBlocks;
     }
 
     private static List<TemplatePlacedBlock> getTemplateBlocks(
@@ -540,6 +585,318 @@ public final class BreachedStructureSpawnManager {
         }
 
         return stateIds;
+    }
+
+    private static void applyTownhallStaircasePlaceholders(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BlockPos pos,
+            StructurePlacementData placementData
+    ) {
+        if (!definition.structureId().equals(BreachedStructureDefinitions.TOWNHALL.structureId())) {
+            return;
+        }
+
+        List<StructureTemplate.StructureBlockInfo> placeholders = template.getInfosForBlock(
+                pos,
+                placementData,
+                Blocks.RESIN_BRICK_STAIRS,
+                true
+        );
+        if (placeholders.isEmpty()) {
+            return;
+        }
+
+        Set<BlockPos> placeholderPositions = new HashSet<>();
+        for (StructureTemplate.StructureBlockInfo placeholder : placeholders) {
+            placeholderPositions.add(placeholder.pos().toImmutable());
+        }
+
+        int replacedStairs = 0;
+        for (StructureTemplate.StructureBlockInfo placeholder : placeholders) {
+            BlockPos stairPos = placeholder.pos();
+            BlockState placeholderState = world.getBlockState(stairPos);
+            if (!placeholderState.isOf(Blocks.RESIN_BRICK_STAIRS)
+                    || !placeholderState.contains(Properties.HORIZONTAL_FACING)) {
+                continue;
+            }
+
+            world.setBlockState(stairPos, createTownhallQuartzStairState(placeholderState), BLOCK_UPDATE_FLAGS);
+            replacedStairs++;
+        }
+
+        int extendedStairs = 0;
+        for (StructureTemplate.StructureBlockInfo placeholder : placeholders) {
+            BlockPos stairPos = placeholder.pos();
+            BlockState stairState = world.getBlockState(stairPos);
+            if (!stairState.isOf(Blocks.QUARTZ_STAIRS)
+                    || !stairState.contains(Properties.HORIZONTAL_FACING)) {
+                continue;
+            }
+
+            Direction descentDirection = getTownhallStairDescentDirection(stairState);
+            if (placeholderPositions.contains(stairPos.offset(descentDirection).down())) {
+                continue;
+            }
+
+            extendedStairs += extendTownhallStaircase(world, stairPos, stairState, descentDirection);
+        }
+
+        if (replacedStairs > 0 || extendedStairs > 0) {
+            System.out.println("[Breached] Built Town Hall quartz staircase from "
+                    + replacedStairs + " resin stair placeholders and "
+                    + extendedStairs + " extension blocks.");
+        }
+    }
+
+    private static BlockState createTownhallQuartzStairState(BlockState placeholderState) {
+        BlockState quartzState = Blocks.QUARTZ_STAIRS.getDefaultState()
+                .with(Properties.HORIZONTAL_FACING, placeholderState.get(Properties.HORIZONTAL_FACING))
+                .with(Properties.BLOCK_HALF, BlockHalf.BOTTOM)
+                .with(Properties.STAIR_SHAPE, StairShape.STRAIGHT);
+        if (quartzState.contains(Properties.WATERLOGGED)) {
+            quartzState = quartzState.with(Properties.WATERLOGGED, false);
+        }
+
+        return quartzState;
+    }
+
+    private static Direction getTownhallStairDescentDirection(BlockState stairState) {
+        return stairState.get(Properties.HORIZONTAL_FACING).getOpposite();
+    }
+
+    private static int extendTownhallStaircase(
+            ServerWorld world,
+            BlockPos topStairPos,
+            BlockState stairState,
+            Direction descentDirection
+    ) {
+        int placedStairs = 0;
+        BlockPos cursor = topStairPos.offset(descentDirection).down();
+        for (int step = 0; step < TOWNHALL_STAIRCASE_MAX_EXTENSION && cursor.getY() > world.getBottomY(); step++) {
+            world.getChunk(Math.floorDiv(cursor.getX(), 16), Math.floorDiv(cursor.getZ(), 16));
+            BlockState targetState = world.getBlockState(cursor);
+            if (isTownhallStairWater(targetState)) {
+                placedStairs += placeTownhallWaterLanding(world, cursor, descentDirection);
+                break;
+            }
+
+            if (!canReplaceWithTownhallStair(world, cursor, targetState)) {
+                break;
+            }
+
+            world.setBlockState(cursor, stairState, BLOCK_UPDATE_FLAGS);
+            clearTownhallStairHeadroom(world, cursor.up());
+            placedStairs++;
+
+            BlockPos belowPos = cursor.down();
+            BlockState belowState = world.getBlockState(belowPos);
+            if (isTownhallStairGround(world, belowPos, belowState)) {
+                break;
+            }
+
+            cursor = cursor.offset(descentDirection).down();
+        }
+
+        return placedStairs;
+    }
+
+    private static int placeTownhallWaterLanding(ServerWorld world, BlockPos startPos, Direction direction) {
+        int placedBlocks = 0;
+        for (int offset = 0; offset < TOWNHALL_WATER_LANDING_LENGTH; offset++) {
+            BlockPos landingPos = startPos.offset(direction, offset);
+            world.getChunk(Math.floorDiv(landingPos.getX(), 16), Math.floorDiv(landingPos.getZ(), 16));
+            BlockState landingState = world.getBlockState(landingPos);
+            if (!isTownhallStairWater(landingState) || world.getBlockEntity(landingPos) != null) {
+                break;
+            }
+
+            world.setBlockState(landingPos, Blocks.QUARTZ_BLOCK.getDefaultState(), BLOCK_UPDATE_FLAGS);
+            clearTownhallStairHeadroom(world, landingPos.up());
+            placedBlocks++;
+        }
+
+        return placedBlocks;
+    }
+
+    private static boolean isTownhallStairWater(BlockState state) {
+        return state.getFluidState().isIn(FluidTags.WATER);
+    }
+
+    private static boolean canReplaceWithTownhallStair(ServerWorld world, BlockPos pos, BlockState state) {
+        return world.getBlockEntity(pos) == null
+                && (state.isAir()
+                || !state.getFluidState().isEmpty()
+                || state.getCollisionShape(world, pos).isEmpty()
+                || state.isOf(Blocks.RESIN_BRICK_STAIRS)
+                || state.isOf(Blocks.QUARTZ_STAIRS));
+    }
+
+    private static void clearTownhallStairHeadroom(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (world.getBlockEntity(pos) == null
+                && (state.isAir()
+                || !state.getFluidState().isEmpty()
+                || state.getCollisionShape(world, pos).isEmpty())) {
+            world.setBlockState(pos, Blocks.AIR.getDefaultState(), BLOCK_UPDATE_FLAGS);
+        }
+    }
+
+    private static boolean isTownhallStairGround(ServerWorld world, BlockPos pos, BlockState state) {
+        return !state.getCollisionShape(world, pos).isEmpty();
+    }
+
+    private static void applyTownhallWaterPlaceholders(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BlockPos pos,
+            StructurePlacementData placementData
+    ) {
+        if (!definition.structureId().equals(BreachedStructureDefinitions.TOWNHALL.structureId())) {
+            return;
+        }
+
+        List<StructureTemplate.StructureBlockInfo> placeholders = template.getInfosForBlock(
+                pos,
+                placementData,
+                Blocks.RESIN_BLOCK,
+                true
+        );
+        if (placeholders.isEmpty()) {
+            return;
+        }
+
+        int waterSources = 0;
+        int catchBasins = 0;
+        Set<Long> waterColumnKeys = new HashSet<>();
+        for (StructureTemplate.StructureBlockInfo placeholder : placeholders) {
+            waterColumnKeys.add(townhallColumnKey(placeholder.pos()));
+        }
+
+        for (StructureTemplate.StructureBlockInfo placeholder : placeholders) {
+            BlockPos waterSourcePos = placeholder.pos();
+            if (!world.getBlockState(waterSourcePos).isOf(Blocks.RESIN_BLOCK)
+                    || world.getBlockEntity(waterSourcePos) != null) {
+                continue;
+            }
+
+            world.setBlockState(waterSourcePos, Blocks.WATER.getDefaultState(), BLOCK_UPDATE_FLAGS);
+            waterSources++;
+
+            if (createTownhallWaterCatchBasin(world, waterSourcePos, waterColumnKeys)) {
+                catchBasins++;
+            }
+        }
+
+        if (waterSources > 0 || catchBasins > 0) {
+            System.out.println("[Breached] Built Town Hall water features from "
+                    + waterSources + " resin block placeholders and "
+                    + catchBasins + " catch basins.");
+        }
+    }
+
+    private static boolean createTownhallWaterCatchBasin(
+            ServerWorld world,
+            BlockPos waterSourcePos,
+            Set<Long> waterColumnKeys
+    ) {
+        Optional<BlockPos> groundSurface = findTownhallGroundSurfaceBelow(world, waterSourcePos);
+        if (groundSurface.isEmpty()) {
+            return false;
+        }
+
+        BlockPos catchPos = groundSurface.get();
+        if (world.getBlockEntity(catchPos) != null) {
+            return false;
+        }
+
+        clearTownhallWaterDropColumn(world, waterSourcePos, catchPos);
+
+        BlockPos floorPos = catchPos.down();
+        if (!isTownhallStairGround(world, floorPos, world.getBlockState(floorPos))
+                && world.getBlockEntity(floorPos) == null) {
+            world.setBlockState(floorPos, Blocks.QUARTZ_BLOCK.getDefaultState(), BLOCK_UPDATE_FLAGS);
+        }
+
+        for (int xOffset = -TOWNHALL_WATER_CATCH_RADIUS; xOffset <= TOWNHALL_WATER_CATCH_RADIUS; xOffset++) {
+            for (int zOffset = -TOWNHALL_WATER_CATCH_RADIUS; zOffset <= TOWNHALL_WATER_CATCH_RADIUS; zOffset++) {
+                if (xOffset == 0 && zOffset == 0) {
+                    continue;
+                }
+
+                BlockPos wallPos = catchPos.add(xOffset, 0, zOffset);
+                BlockState wallState = clearTownhallWaterFeatureVegetation(world, wallPos);
+                if (waterColumnKeys.contains(townhallColumnKey(wallPos))) {
+                    if (world.getBlockEntity(wallPos) == null && wallState.isOf(Blocks.QUARTZ_BLOCK)) {
+                        world.setBlockState(wallPos, Blocks.AIR.getDefaultState(), BLOCK_UPDATE_FLAGS);
+                    }
+                    continue;
+                }
+
+                if (world.getBlockEntity(wallPos) == null
+                        && (wallState.getCollisionShape(world, wallPos).isEmpty()
+                        || !wallState.getFluidState().isEmpty())) {
+                    world.setBlockState(wallPos, Blocks.QUARTZ_BLOCK.getDefaultState(), BLOCK_UPDATE_FLAGS);
+                }
+            }
+        }
+
+        world.setBlockState(catchPos, Blocks.WATER.getDefaultState(), BLOCK_UPDATE_FLAGS);
+        return true;
+    }
+
+    private static Optional<BlockPos> findTownhallGroundSurfaceBelow(ServerWorld world, BlockPos waterSourcePos) {
+        for (BlockPos.Mutable cursor = waterSourcePos.down().mutableCopy();
+             cursor.getY() > world.getBottomY();
+             cursor.move(Direction.DOWN)) {
+            world.getChunk(Math.floorDiv(cursor.getX(), 16), Math.floorDiv(cursor.getZ(), 16));
+            BlockState state = clearTownhallWaterFeatureVegetation(world, cursor);
+            if (isTownhallStairGround(world, cursor, state)) {
+                return Optional.of(cursor.toImmutable());
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    private static void clearTownhallWaterDropColumn(ServerWorld world, BlockPos waterSourcePos, BlockPos catchPos) {
+        int minY = Math.max(catchPos.getY() + 1, world.getBottomY());
+        for (int y = waterSourcePos.getY() - 1; y >= minY; y--) {
+            BlockPos pos = new BlockPos(waterSourcePos.getX(), y, waterSourcePos.getZ());
+            world.getChunk(Math.floorDiv(pos.getX(), 16), Math.floorDiv(pos.getZ(), 16));
+            BlockState state = clearTownhallWaterFeatureVegetation(world, pos);
+            if (world.getBlockEntity(pos) == null && state.isOf(Blocks.QUARTZ_BLOCK)) {
+                world.setBlockState(pos, Blocks.AIR.getDefaultState(), BLOCK_UPDATE_FLAGS);
+            }
+        }
+    }
+
+    private static BlockState clearTownhallWaterFeatureVegetation(ServerWorld world, BlockPos pos) {
+        BlockState state = world.getBlockState(pos);
+        if (world.getBlockEntity(pos) == null && isTownhallWaterFeatureVegetation(state)) {
+            world.setBlockState(pos, Blocks.AIR.getDefaultState(), BLOCK_UPDATE_FLAGS);
+            return Blocks.AIR.getDefaultState();
+        }
+
+        return state;
+    }
+
+    private static boolean isTownhallWaterFeatureVegetation(BlockState state) {
+        return state.isIn(BlockTags.LOGS)
+                || state.isIn(BlockTags.LEAVES)
+                || state.isIn(BlockTags.FLOWERS)
+                || state.isOf(Blocks.TALL_GRASS)
+                || state.isOf(Blocks.SHORT_GRASS)
+                || state.isOf(Blocks.FERN)
+                || state.isOf(Blocks.LARGE_FERN)
+                || state.isOf(Blocks.VINE)
+                || state.isOf(Blocks.SNOW);
+    }
+
+    private static long townhallColumnKey(BlockPos pos) {
+        return ((long) pos.getX() << 32) ^ (pos.getZ() & 0xFFFFFFFFL);
     }
 
     private static NbtList getPrimaryPalette(NbtCompound templateNbt) {

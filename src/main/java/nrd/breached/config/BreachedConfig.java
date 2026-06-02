@@ -151,6 +151,9 @@ public final class BreachedConfig {
         settings.put("breached:eyeball", new StructureSettings(64, null, null));
         settings.put("breached:death", new StructureSettings(null, null, null));
         settings.put("breached:cavehut", new StructureSettings(null, null, null));
+        settings.put("breached:minorcave1", new StructureSettings(null, null, null));
+        settings.put("breached:minorcave2", new StructureSettings(null, null, null));
+        settings.put("breached:minorcave3", new StructureSettings(null, null, null));
         settings.put("breached:pueblo1", new StructureSettings(null, null, null));
         settings.put("breached:pueblo2", new StructureSettings(null, null, null));
         settings.put("breached:tinyhome1", new StructureSettings(null, null, null));

@@ -7,6 +7,7 @@ import net.minecraft.storage.WriteView;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.TeleportTarget;
+import nrd.breached.respawn.InitialTownhallSpawnManager;
 import nrd.breached.respawn.RespawnCooldownManager;
 import nrd.breached.worldgen.BreachedStructurePlacementManager;
 import org.spongepowered.asm.mixin.Mixin;
@@ -71,11 +72,13 @@ public class ServerPlayerRespawnMixin {
     private void breached$readBedRespawns(ReadView view, CallbackInfo ci) {
         ServerPlayerEntity player = (ServerPlayerEntity) (Object) this;
         RespawnCooldownManager.readBedRespawns(player, view);
+        InitialTownhallSpawnManager.readInitialTownhallSpawnFlag(player, view);
     }
 
     @Inject(method = "writeCustomData", at = @At("TAIL"))
     private void breached$writeBedRespawns(WriteView view, CallbackInfo ci) {
         ServerPlayerEntity player = (ServerPlayerEntity) (Object) this;
         RespawnCooldownManager.writeBedRespawns(player, view);
+        InitialTownhallSpawnManager.writeInitialTownhallSpawnFlag(player, view);
     }
 }

@@ -96,6 +96,16 @@ public final class BreachedStructurePlacementManager {
     private static final int MINOR_FOREST_VEGETATION_OBSTRUCTION_LIMIT = 256;
     private static final int MINOR_POI_PLAYER_REPLACED_BLOCK_PERCENT = 25;
     private static final int MINOR_POI_CHUNK_INSET = 2;
+    private static final int CAVE_MINOR_POI_MIN_ORIGIN_Y = -16;
+    private static final int CAVE_MINOR_POI_MAX_ORIGIN_Y = 48;
+    private static final int CAVE_MINOR_POI_MIN_SURFACE_CLEARANCE = 8;
+    private static final int CAVE_MINOR_POI_Y_CANDIDATES = 9;
+    private static final int CAVE_MINOR_POI_CHUNK_CHANCE_DIVISOR = 4;
+    private static final int CAVE_MINOR_POI_LOCAL_CANDIDATES_PER_CHUNK = 10;
+    private static final int CAVE_MINOR_POI_SAMPLE_STEP = 3;
+    private static final int CAVE_MINOR_POI_CLAIM_SAMPLE_STEP = 4;
+    private static final double CAVE_MINOR_POI_BURIED_PENALTY = 90_000.0D;
+    private static final double CAVE_MINOR_POI_AIR_SAMPLE_PENALTY = 3_000.0D;
     private static final int MAJOR_ZONE_MESSAGE_INTERVAL_TICKS = 20;
     private static final int TOWNHALL_SPAWN_PLAYER_HEIGHT = 2;
     private static final Block TOWNHALL_SPAWN_MARKER_BLOCK = Blocks.LIGHT_BLUE_CARPET;
@@ -1001,12 +1011,61 @@ public final class BreachedStructurePlacementManager {
             return MinorPoiAttemptResult.FAILED;
         }
 
+        MinorPoiAttemptResult caveResult = tryPlaceCaveMinorPoiInChunk(world, state, chunkPos);
+        if (caveResult == MinorPoiAttemptResult.PLACED) {
+            return MinorPoiAttemptResult.PLACED;
+        }
+
+        MinorPoiAttemptResult surfaceResult = tryPlaceSurfaceMinorPoiInChunk(world, state, chunkPos);
+        if (surfaceResult == MinorPoiAttemptResult.PLACED) {
+            return MinorPoiAttemptResult.PLACED;
+        }
+
+        return caveResult == MinorPoiAttemptResult.NOT_READY || surfaceResult == MinorPoiAttemptResult.NOT_READY
+                ? MinorPoiAttemptResult.NOT_READY
+                : MinorPoiAttemptResult.FAILED;
+    }
+
+    private static MinorPoiAttemptResult tryPlaceCaveMinorPoiInChunk(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            ChunkPos chunkPos
+    ) {
+        java.util.Random random = createCaveMinorPoiChunkRandom(world.getSeed(), chunkPos);
+        if (random.nextInt(CAVE_MINOR_POI_CHUNK_CHANCE_DIVISOR) != 0) {
+            return MinorPoiAttemptResult.FAILED;
+        }
+
+        return placeBestMinorPoiInChunk(
+                world,
+                state,
+                chunkPos,
+                random,
+                caveMinorCandidateIndex(chunkPos),
+                CAVE_MINOR_POI_LOCAL_CANDIDATES_PER_CHUNK,
+                true
+        );
+    }
+
+    private static MinorPoiAttemptResult tryPlaceSurfaceMinorPoiInChunk(
+            ServerWorld world,
+            BreachedStructurePlacementState state,
+            ChunkPos chunkPos
+    ) {
         java.util.Random random = createMinorPoiChunkRandom(world.getSeed(), chunkPos);
         if (random.nextInt(BreachedConfig.get().minorPoi.chunkChanceDivisor) != 0) {
             return MinorPoiAttemptResult.FAILED;
         }
 
-        return placeBestMinorPoiInChunk(world, state, chunkPos, random);
+        return placeBestMinorPoiInChunk(
+                world,
+                state,
+                chunkPos,
+                random,
+                minorCandidateIndex(chunkPos),
+                BreachedConfig.get().minorPoi.localCandidatesPerChunk,
+                false
+        );
     }
 
     private static void tryPlacePendingMinorPoiChunks(
@@ -1073,16 +1132,21 @@ public final class BreachedStructurePlacementManager {
             ServerWorld world,
             BreachedStructurePlacementState state,
             ChunkPos chunkPos,
-            java.util.Random random
+            java.util.Random random,
+            int candidateIndex,
+            int localCandidateCount,
+            boolean caveOnly
     ) {
-        int candidateIndex = minorCandidateIndex(chunkPos);
-        List<MinorPoiLocalCandidate> localCandidates = generateMinorPoiLocalCandidates(chunkPos, random);
+        List<MinorPoiLocalCandidate> localCandidates = generateMinorPoiLocalCandidates(chunkPos, random, localCandidateCount);
         MinorPoiPlacementChoice bestChoice = null;
         boolean skippedUnloadedFootprint = false;
 
         for (BreachedStructureDefinition definition : BreachedStructureDefinitions.MINOR_POI_STRUCTURES) {
             BreachedStructureDefinition activeDefinition = getActiveDefinition(world, definition);
             if (!world.getRegistryKey().equals(activeDefinition.requiredDimension())) {
+                continue;
+            }
+            if (isCaveMinorPoi(activeDefinition) != caveOnly) {
                 continue;
             }
 
@@ -1155,7 +1219,7 @@ public final class BreachedStructurePlacementManager {
             return skippedUnloadedFootprint ? MinorPoiAttemptResult.NOT_READY : MinorPoiAttemptResult.FAILED;
         }
 
-        int originY = getPlacementOriginY(world, bestChoice.definition(), bestChoice.site());
+        int originY = bestChoice.originY();
         BlockPos origin = new BlockPos(bestChoice.originX(), originY, bestChoice.originZ());
         Vec3i footprintSize = BreachedStructureSpawnManager.getRotatedSize(bestChoice.template().getSize(), bestChoice.definition().rotation());
         List<BreachedStructurePlacementState.SavedBlockSnapshot> restoreBlocks = captureOriginalMinorPoiBlocks(
@@ -1226,7 +1290,7 @@ public final class BreachedStructurePlacementManager {
         int originZ = getPlacementOriginZ(definition, candidate);
         int centerX = originX + footprintSize.getX() / 2;
         int centerZ = originZ + footprintSize.getZ() / 2;
-        if (isMinorPoiSpreadCellFull(state, centerX, centerZ)) {
+        if (isMinorPoiSpreadCellFull(state, centerX, centerZ, isCaveMinorPoi(definition))) {
             return MinorPoiPlacementChoice.SPREAD_CELL_FULL;
         }
 
@@ -1251,8 +1315,70 @@ public final class BreachedStructurePlacementManager {
             return null;
         }
 
+        if (isCaveMinorPoi(definition)) {
+            return evaluateCaveMinorPoiChoice(
+                    world,
+                    definition,
+                    placementKey,
+                    template,
+                    footprintSize,
+                    candidate,
+                    site,
+                    originX,
+                    originZ,
+                    minorSpacing
+            );
+        }
+
         ObstructionEvaluation obstruction = evaluateObstruction(world, definition, footprintSize, site);
         if (!obstruction.accepted()) {
+            return null;
+        }
+
+        int originY = getPlacementOriginY(world, definition, site);
+        return new MinorPoiPlacementChoice(
+                definition,
+                placementKey,
+                template,
+                candidate,
+                site,
+                originX,
+                originY,
+                originZ,
+                site.score() + obstruction.penalty() + minorSpacing.penalty()
+        );
+    }
+
+    private static MinorPoiPlacementChoice evaluateCaveMinorPoiChoice(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            String placementKey,
+            StructureTemplate template,
+            Vec3i footprintSize,
+            BreachedStructureSpawnManager.RadiusCandidate candidate,
+            BreachedStructureSite site,
+            int originX,
+            int originZ,
+            SpacingEvaluation minorSpacing
+    ) {
+        CaveMinorPoiEvaluation bestEvaluation = null;
+        for (int originY : generateCaveMinorPoiOriginYCandidates(world, site, footprintSize)) {
+            BlockPos origin = new BlockPos(originX, originY, originZ);
+            if (isCaveMinorPoiFootprintClaimed(world, origin, footprintSize)) {
+                continue;
+            }
+
+            Optional<CaveMinorPoiEvaluation> evaluation = evaluateCaveMinorPoiVolume(world, origin, footprintSize);
+            if (evaluation.isEmpty()) {
+                continue;
+            }
+
+            if (bestEvaluation == null || evaluation.get().penalty() < bestEvaluation.penalty()) {
+                bestEvaluation = evaluation.get();
+            }
+        }
+
+        if (bestEvaluation == null) {
             return null;
         }
 
@@ -1263,14 +1389,225 @@ public final class BreachedStructurePlacementManager {
                 candidate,
                 site,
                 originX,
+                bestEvaluation.originY(),
                 originZ,
-                site.score() + obstruction.penalty() + minorSpacing.penalty()
+                site.score() + bestEvaluation.penalty() + minorSpacing.penalty()
         );
     }
 
-    private static List<MinorPoiLocalCandidate> generateMinorPoiLocalCandidates(ChunkPos chunkPos, java.util.Random random) {
+    private static List<Integer> generateCaveMinorPoiOriginYCandidates(
+            ServerWorld world,
+            BreachedStructureSite site,
+            Vec3i footprintSize
+    ) {
+        int templateHeight = Math.max(1, footprintSize.getY());
+        int minY = Math.max(world.getBottomY() + 8, CAVE_MINOR_POI_MIN_ORIGIN_Y);
+        int maxY = Math.min(CAVE_MINOR_POI_MAX_ORIGIN_Y, site.minSurfaceY() - CAVE_MINOR_POI_MIN_SURFACE_CLEARANCE - templateHeight);
+        maxY = Math.min(maxY, world.getTopYInclusive() - templateHeight + 1);
+        if (maxY < minY) {
+            return List.of();
+        }
+
+        if (maxY == minY) {
+            return List.of(minY);
+        }
+
+        int candidateCount = Math.min(CAVE_MINOR_POI_Y_CANDIDATES, maxY - minY + 1);
+        List<Integer> candidates = new ArrayList<>();
+        for (int index = 0; index < candidateCount; index++) {
+            int y = maxY - (int) Math.round(((maxY - minY) * index) / (double) Math.max(1, candidateCount - 1));
+            if (!candidates.contains(y)) {
+                candidates.add(y);
+            }
+        }
+
+        return candidates;
+    }
+
+    private static Optional<CaveMinorPoiEvaluation> evaluateCaveMinorPoiVolume(
+            ServerWorld world,
+            BlockPos origin,
+            Vec3i footprintSize
+    ) {
+        int sampledBlocks = 0;
+        int airSamples = 0;
+        int fluidSamples = 0;
+        int blockedSamples = 0;
+
+        for (int x : createSteppedCoordinates(origin.getX(), origin.getX() + footprintSize.getX() - 1, CAVE_MINOR_POI_SAMPLE_STEP)) {
+            for (int y : createSteppedCoordinates(origin.getY(), origin.getY() + footprintSize.getY() - 1, CAVE_MINOR_POI_SAMPLE_STEP)) {
+                for (int z : createSteppedCoordinates(origin.getZ(), origin.getZ() + footprintSize.getZ() - 1, CAVE_MINOR_POI_SAMPLE_STEP)) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    sampledBlocks++;
+
+                    if (world.getBlockEntity(pos) != null) {
+                        blockedSamples++;
+                        continue;
+                    }
+
+                    if (!state.getFluidState().isEmpty()) {
+                        fluidSamples++;
+                        continue;
+                    }
+
+                    if (state.isAir() || state.getCollisionShape(world, pos).isEmpty()) {
+                        airSamples++;
+                        continue;
+                    }
+
+                    if (!isNaturalCaveReplacementState(state)) {
+                        blockedSamples++;
+                    }
+                }
+            }
+        }
+
+        if (sampledBlocks == 0 || fluidSamples > 0 || blockedSamples > 0) {
+            return Optional.empty();
+        }
+
+        int connectionAirSamples = airSamples + countCaveMinorPoiShellAirSamples(world, origin, footprintSize);
+        int targetAirSamples = Math.max(2, sampledBlocks / 12);
+        double penalty = Math.abs(connectionAirSamples - targetAirSamples) * CAVE_MINOR_POI_AIR_SAMPLE_PENALTY;
+        if (connectionAirSamples == 0) {
+            penalty += CAVE_MINOR_POI_BURIED_PENALTY;
+        }
+
+        if (airSamples * 4 > sampledBlocks * 3) {
+            penalty += (airSamples - (sampledBlocks * 0.75D)) * CAVE_MINOR_POI_AIR_SAMPLE_PENALTY;
+        }
+
+        penalty += Math.max(0, CAVE_MINOR_POI_MAX_ORIGIN_Y - origin.getY()) * 250.0D;
+        return Optional.of(new CaveMinorPoiEvaluation(origin.getY(), penalty));
+    }
+
+    private static int countCaveMinorPoiShellAirSamples(
+            ServerWorld world,
+            BlockPos origin,
+            Vec3i footprintSize
+    ) {
+        int minX = origin.getX() - 1;
+        int maxX = origin.getX() + footprintSize.getX();
+        int minY = Math.max(world.getBottomY(), origin.getY() - 1);
+        int maxY = Math.min(world.getTopYInclusive(), origin.getY() + footprintSize.getY());
+        int minZ = origin.getZ() - 1;
+        int maxZ = origin.getZ() + footprintSize.getZ();
+        int airSamples = 0;
+
+        for (int x : createSteppedCoordinates(minX, maxX, CAVE_MINOR_POI_SAMPLE_STEP)) {
+            for (int y : createSteppedCoordinates(minY, maxY, CAVE_MINOR_POI_SAMPLE_STEP)) {
+                for (int z : createSteppedCoordinates(minZ, maxZ, CAVE_MINOR_POI_SAMPLE_STEP)) {
+                    if (x != minX && x != maxX && y != minY && y != maxY && z != minZ && z != maxZ) {
+                        continue;
+                    }
+
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    if (!state.getFluidState().isEmpty()) {
+                        continue;
+                    }
+
+                    if (state.isAir() || state.getCollisionShape(world, pos).isEmpty()) {
+                        airSamples++;
+                    }
+                }
+            }
+        }
+
+        return airSamples;
+    }
+
+    private static boolean isCaveMinorPoiFootprintClaimed(
+            ServerWorld world,
+            BlockPos origin,
+            Vec3i footprintSize
+    ) {
+        for (int x : createSteppedCoordinates(origin.getX(), origin.getX() + footprintSize.getX() - 1, CAVE_MINOR_POI_CLAIM_SAMPLE_STEP)) {
+            for (int y : createSteppedCoordinates(origin.getY(), origin.getY() + footprintSize.getY() - 1, CAVE_MINOR_POI_CLAIM_SAMPLE_STEP)) {
+                for (int z : createSteppedCoordinates(origin.getZ(), origin.getZ() + footprintSize.getZ() - 1, CAVE_MINOR_POI_CLAIM_SAMPLE_STEP)) {
+                    if (LandlockClaimManager.isInsideAnyClaim(world, new BlockPos(x, y, z))) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static List<Integer> createSteppedCoordinates(int start, int end, int step) {
+        if (end < start) {
+            return List.of();
+        }
+
+        List<Integer> values = new ArrayList<>();
+        int safeStep = Math.max(1, step);
+        for (int value = start; value <= end; value += safeStep) {
+            values.add(value);
+        }
+
+        if (values.isEmpty() || values.get(values.size() - 1) != end) {
+            values.add(end);
+        }
+
+        return values;
+    }
+
+    private static boolean isNaturalCaveReplacementState(BlockState state) {
+        return state.isOf(Blocks.STONE)
+                || state.isOf(Blocks.GRANITE)
+                || state.isOf(Blocks.DIORITE)
+                || state.isOf(Blocks.ANDESITE)
+                || state.isOf(Blocks.DEEPSLATE)
+                || state.isOf(Blocks.TUFF)
+                || state.isOf(Blocks.CALCITE)
+                || state.isOf(Blocks.DRIPSTONE_BLOCK)
+                || state.isOf(Blocks.POINTED_DRIPSTONE)
+                || state.isOf(Blocks.GRAVEL)
+                || state.isOf(Blocks.SAND)
+                || state.isOf(Blocks.RED_SAND)
+                || state.isOf(Blocks.SANDSTONE)
+                || state.isOf(Blocks.RED_SANDSTONE)
+                || state.isOf(Blocks.CLAY)
+                || state.isOf(Blocks.GRASS_BLOCK)
+                || state.isOf(Blocks.DIRT)
+                || state.isOf(Blocks.COARSE_DIRT)
+                || state.isOf(Blocks.ROOTED_DIRT)
+                || state.isOf(Blocks.PODZOL)
+                || state.isOf(Blocks.MYCELIUM)
+                || state.isOf(Blocks.MUD)
+                || state.isOf(Blocks.MOSS_BLOCK)
+                || state.isOf(Blocks.SCULK)
+                || state.isOf(Blocks.SCULK_VEIN)
+                || state.isOf(Blocks.COAL_ORE)
+                || state.isOf(Blocks.DEEPSLATE_COAL_ORE)
+                || state.isOf(Blocks.IRON_ORE)
+                || state.isOf(Blocks.DEEPSLATE_IRON_ORE)
+                || state.isOf(Blocks.COPPER_ORE)
+                || state.isOf(Blocks.DEEPSLATE_COPPER_ORE)
+                || state.isOf(Blocks.GOLD_ORE)
+                || state.isOf(Blocks.DEEPSLATE_GOLD_ORE)
+                || state.isOf(Blocks.REDSTONE_ORE)
+                || state.isOf(Blocks.DEEPSLATE_REDSTONE_ORE)
+                || state.isOf(Blocks.EMERALD_ORE)
+                || state.isOf(Blocks.DEEPSLATE_EMERALD_ORE)
+                || state.isOf(Blocks.LAPIS_ORE)
+                || state.isOf(Blocks.DEEPSLATE_LAPIS_ORE)
+                || state.isOf(Blocks.DIAMOND_ORE)
+                || state.isOf(Blocks.DEEPSLATE_DIAMOND_ORE)
+                || state.isOf(Blocks.AMETHYST_BLOCK)
+                || state.isOf(Blocks.BUDDING_AMETHYST)
+                || state.isOf(Blocks.SMOOTH_BASALT);
+    }
+
+    private static List<MinorPoiLocalCandidate> generateMinorPoiLocalCandidates(
+            ChunkPos chunkPos,
+            java.util.Random random,
+            int candidateCount
+    ) {
         List<MinorPoiLocalCandidate> candidates = new ArrayList<>();
-        for (int attempt = 0; attempt < BreachedConfig.get().minorPoi.localCandidatesPerChunk; attempt++) {
+        for (int attempt = 0; attempt < Math.max(1, candidateCount); attempt++) {
             int x = chunkPos.x * CHUNK_SIZE + MINOR_POI_CHUNK_INSET + random.nextInt(CHUNK_SIZE - (MINOR_POI_CHUNK_INSET * 2));
             int z = chunkPos.z * CHUNK_SIZE + MINOR_POI_CHUNK_INSET + random.nextInt(CHUNK_SIZE - (MINOR_POI_CHUNK_INSET * 2));
             candidates.add(new MinorPoiLocalCandidate(x, z));
@@ -1305,6 +1642,19 @@ public final class BreachedStructurePlacementManager {
                 definition.rotation()
         )) {
             captureOriginalBlockSnapshot(world, expectedBlock.pos(), snapshots);
+        }
+
+        if (isCaveMinorPoi(definition)) {
+            for (BreachedStructureSpawnManager.TemplatePlacedBlock airMarkerBlock : BreachedStructureSpawnManager.getTemplateJigsawAirBlocks(
+                    world,
+                    definition,
+                    template,
+                    origin,
+                    definition.mirror(),
+                    definition.rotation()
+            )) {
+                captureOriginalBlockSnapshot(world, airMarkerBlock.pos(), snapshots);
+            }
         }
 
         captureOriginalSupportBlocks(world, definition, origin, footprintSize, snapshots);
@@ -2324,6 +2674,11 @@ public final class BreachedStructurePlacementManager {
         return BreachedStructureDefinitions.key(definition).equals(SKYHOME_STRUCTURE_KEY);
     }
 
+    private static boolean isCaveMinorPoi(BreachedStructureDefinition definition) {
+        return definition.placementMode() == BreachedStructureDefinition.PlacementMode.CAVE
+                && definition.spacingGroup() == BreachedStructureDefinition.SpacingGroup.MINOR;
+    }
+
     private static boolean isTownhallStructure(BreachedStructureDefinition definition) {
         return BreachedStructureDefinitions.key(definition).equals(TOWNHALL_STRUCTURE_KEY);
     }
@@ -2366,8 +2721,20 @@ public final class BreachedStructurePlacementManager {
         return new java.util.Random(seed);
     }
 
+    private static java.util.Random createCaveMinorPoiChunkRandom(long worldSeed, ChunkPos chunkPos) {
+        long seed = worldSeed
+                ^ 0x434156454D49504FL
+                ^ ((long) chunkPos.x * 132897987541L)
+                ^ ((long) chunkPos.z * 341873128712L);
+        return new java.util.Random(seed);
+    }
+
     private static int minorCandidateIndex(ChunkPos chunkPos) {
         return (chunkPos.x & 0xFFFF) << 16 | (chunkPos.z & 0xFFFF);
+    }
+
+    private static int caveMinorCandidateIndex(ChunkPos chunkPos) {
+        return minorCandidateIndex(chunkPos) ^ 0x43560000;
     }
 
     private static boolean isInsideDefinitionRadius(BreachedStructureDefinition definition, int x, int z) {
@@ -2757,9 +3124,8 @@ public final class BreachedStructurePlacementManager {
                 diagnostics.majorStructuresRestocked++;
                 diagnostics.majorContainersRestocked += restockedContainers;
                 if (lootConfig.announceRestocks) {
-                    world.getServer().getPlayerManager().broadcast(
-                            getMajorRestockAnnouncement(entry.getKey()),
-                            false
+                    getMajorRestockAnnouncement(entry.getKey()).ifPresent(message ->
+                            world.getServer().getPlayerManager().broadcast(message, false)
                     );
                 }
                 System.out.println("[Breached] Restocked " + restockedContainers
@@ -2862,9 +3228,8 @@ public final class BreachedStructurePlacementManager {
         }
 
         if (lootConfig.announceRestocks) {
-            world.getServer().getPlayerManager().broadcast(
-                    getMajorRestockAnnouncement(getPortalStructureKey(portalEventType)),
-                    false
+            getMajorRestockAnnouncement(getPortalStructureKey(portalEventType)).ifPresent(message ->
+                    world.getServer().getPlayerManager().broadcast(message, false)
             );
         }
 
@@ -3623,31 +3988,34 @@ public final class BreachedStructurePlacementManager {
         }
     }
 
-    private static Text getMajorRestockAnnouncement(String placementKey) {
+    private static Optional<Text> getMajorRestockAnnouncement(String placementKey) {
         String structureKey = structureKey(placementKey);
+        if (structureKey.equals(TOWNHALL_STRUCTURE_KEY)) {
+            return Optional.empty();
+        }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.SWORD_STATUE))) {
-            return Text.literal("Statue has been restocked").formatted(Formatting.BLACK);
+            return Optional.of(Text.literal("Statue has been restocked").formatted(Formatting.BLACK));
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.PINK_TREE))) {
-            return Text.literal("Great Tree has been restocked").formatted(Formatting.LIGHT_PURPLE);
+            return Optional.of(Text.literal("Great Tree has been restocked").formatted(Formatting.LIGHT_PURPLE));
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.BIG_BOAT))) {
-            return Text.literal("Ship has been restocked").formatted(Formatting.BLUE);
+            return Optional.of(Text.literal("Ship has been restocked").formatted(Formatting.BLUE));
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.HORACE))) {
-            return Text.literal("Horace has been restocked").formatted(Formatting.RED);
+            return Optional.of(Text.literal("Horace has been restocked").formatted(Formatting.RED));
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.OFFICIAL_NETHER_PORTAL))) {
-            return Text.literal("Nether Portal structures have been restocked.").formatted(Formatting.DARK_PURPLE);
+            return Optional.of(Text.literal("Nether Portal structures have been restocked.").formatted(Formatting.DARK_PURPLE));
         }
         if (structureKey.equals(END_PORTAL_STRUCTURE_KEY)) {
-            return Text.literal("End Portal has been restocked.").formatted(Formatting.DARK_PURPLE);
+            return Optional.of(Text.literal("End Portal has been restocked.").formatted(Formatting.DARK_PURPLE));
         }
         if (structureKey.equals(EYEBALL_STRUCTURE_KEY)) {
-            return Text.literal("Eyeball has been restocked").formatted(Formatting.DARK_RED);
+            return Optional.of(Text.literal("Eyeball has been restocked").formatted(Formatting.DARK_RED));
         }
 
-        return Text.literal("Major structure loot has been restocked");
+        return Optional.of(Text.literal("Major structure loot has been restocked"));
     }
 
     private static boolean tryBackfillMajorLootContainers(
@@ -4017,16 +4385,28 @@ public final class BreachedStructurePlacementManager {
         return new SpacingEvaluation(true, penalty, null);
     }
 
-    private static boolean isMinorPoiSpreadCellFull(BreachedStructurePlacementState state, int x, int z) {
+    private static boolean isMinorPoiSpreadCellFull(
+            BreachedStructurePlacementState state,
+            int x,
+            int z,
+            boolean caveCell
+    ) {
         BreachedConfig.MinorPoiSettings minorPoiConfig = BreachedConfig.get().minorPoi;
-        return countPlacedMinorPoisInSpreadCell(state, x, z, minorPoiConfig.spreadCellSizeBlocks) >= minorPoiConfig.maxPerSpreadCell;
+        return countPlacedMinorPoisInSpreadCell(
+                state,
+                x,
+                z,
+                minorPoiConfig.spreadCellSizeBlocks,
+                caveCell
+        ) >= minorPoiConfig.maxPerSpreadCell;
     }
 
     private static int countPlacedMinorPoisInSpreadCell(
             BreachedStructurePlacementState state,
             int x,
             int z,
-            int spreadCellSizeBlocks
+            int spreadCellSizeBlocks,
+            boolean caveCell
     ) {
         int cellX = spreadCellCoordinate(x, spreadCellSizeBlocks);
         int cellZ = spreadCellCoordinate(z, spreadCellSizeBlocks);
@@ -4034,6 +4414,10 @@ public final class BreachedStructurePlacementManager {
 
         for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
             if (!isActiveMinorPoiPlacement(placement.getKey(), placement.getValue())) {
+                continue;
+            }
+            Optional<BreachedStructureDefinition> definition = getBaseDefinition(structureKey(placement.getKey()));
+            if (definition.isEmpty() || isCaveMinorPoi(definition.get()) != caveCell) {
                 continue;
             }
 
@@ -4832,6 +5216,7 @@ public final class BreachedStructurePlacementManager {
             BreachedStructureSpawnManager.RadiusCandidate candidate,
             BreachedStructureSite site,
             int originX,
+            int originY,
             int originZ,
             double score
     ) {
@@ -4841,6 +5226,7 @@ public final class BreachedStructurePlacementManager {
                 null,
                 null,
                 null,
+                0,
                 0,
                 0,
                 Double.MAX_VALUE
@@ -4853,6 +5239,7 @@ public final class BreachedStructurePlacementManager {
                 null,
                 0,
                 0,
+                0,
                 Double.MAX_VALUE
         );
         private static final MinorPoiPlacementChoice SPACING_BLOCKED = new MinorPoiPlacementChoice(
@@ -4863,8 +5250,12 @@ public final class BreachedStructurePlacementManager {
                 null,
                 0,
                 0,
+                0,
                 Double.MAX_VALUE
         );
+    }
+
+    private record CaveMinorPoiEvaluation(int originY, double penalty) {
     }
 
     private record PortalRestockTarget(

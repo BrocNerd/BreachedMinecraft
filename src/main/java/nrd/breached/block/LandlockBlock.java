@@ -9,12 +9,14 @@ import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import nrd.breached.landlock.LandlockClaimManager;
+import nrd.breached.landlock.LandlockMapState;
 
 import java.util.UUID;
 
@@ -46,6 +48,7 @@ public class LandlockBlock extends BlockWithEntity {
 
         if (!world.isClient() && placer instanceof PlayerEntity player && world.getBlockEntity(pos) instanceof LandlockBlockEntity landlock) {
             landlock.setOwnerUuid(player.getUuid());
+            updateLandlockMapState(world, landlock);
         }
     }
 
@@ -64,13 +67,14 @@ public class LandlockBlock extends BlockWithEntity {
         if (ownerUuid == null) {
             player.sendMessage(Text.literal("This Landlock has no owner."), false);
         } else if (player.isSneaking()) {
-            handleSneakUse(player, landlock, ownerUuid);
+            handleSneakUse(world, player, landlock, ownerUuid);
         } else if (ownerUuid.equals(player.getUuid())) {
             player.sendMessage(Text.literal("You own this Landlock."), false);
         } else if (landlock.isAuthorized(player.getUuid())) {
             player.sendMessage(Text.literal("You are authorized on this Landlock."), false);
         } else if (LandlockClaimManager.countPlayerLandlockAuthorizations(world, player.getUuid()) < LandlockClaimManager.MAX_AUTHORIZED_LANDLOCKS) {
             landlock.addAuthorizedPlayer(player.getUuid());
+            updateLandlockMapState(world, landlock);
             player.sendMessage(Text.literal("You are now authorized on this Landlock."), false);
         } else {
             player.sendMessage(Text.literal("You are already authorized on the maximum number of Landlocks."), false);
@@ -80,13 +84,20 @@ public class LandlockBlock extends BlockWithEntity {
         return ActionResult.SUCCESS;
     }
 
-    private static void handleSneakUse(PlayerEntity player, LandlockBlockEntity landlock, UUID ownerUuid) {
+    private static void handleSneakUse(World world, PlayerEntity player, LandlockBlockEntity landlock, UUID ownerUuid) {
         if (ownerUuid.equals(player.getUuid())) {
             player.sendMessage(Text.literal("You own this Landlock. Break it to remove it from your authorization count."), false);
         } else if (landlock.removeAuthorizedPlayer(player.getUuid())) {
+            updateLandlockMapState(world, landlock);
             player.sendMessage(Text.literal("You are no longer authorized on this Landlock."), false);
         } else {
             player.sendMessage(Text.literal("You are not authorized on this Landlock."), false);
+        }
+    }
+
+    private static void updateLandlockMapState(World world, LandlockBlockEntity landlock) {
+        if (world instanceof ServerWorld serverWorld) {
+            LandlockMapState.update(serverWorld, landlock);
         }
     }
 }

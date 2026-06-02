@@ -179,7 +179,7 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Tier 2",
-                                    "The Diamond Crafting Table is the midgame push. Use it for diamond gear, enchanting tables, and the Diamond Breacher.",
+                                    "The Diamond Crafting Table is the midgame push. Use it for diamond gear, enchanting tables, potions, and the Diamond Breacher.",
                                     List.of(recipe(
                                             "tier_2_crafting_bench",
                                             "Diamond Crafting Table",
@@ -240,6 +240,18 @@ public class BreachedArchiveScreen extends Screen {
                             new ArchiveSection(
                                     "Teams",
                                     "Teams help friends coordinate and identify each other. Join a team and you'll be able to see your teammates on the locator bar."
+                            ),
+                            new ArchiveSection(
+                                    "Combat Logging",
+                                    "Damaging another player starts Adrenaline for both of you. Adrenaline lasts 45 seconds, refreshes from more player damage, and gives Mining Fatigue II so fights are harder to escape by instantly mining away.\n" +
+                                            "\n" +
+                                            "If you log out with Adrenaline, your combat body stays vulnerable for 60 seconds. If another player kills it, your loot drops there and you will die when you log back in."
+                            ),
+                            new ArchiveSection(
+                                    "Deep Mining",
+                                    "The deeper you go, the less room you have for mistakes. Below Y 50, your maximum hearts drop by half a heart about every 10 blocks. At the lowest depths near Y -60, you only have 3 usable hearts!\n" +
+                                            "\n" +
+                                            "Deaths below Y 0 are announced to the server and marked on everyone's Breached Map for 1 minute."
                             ),
                             new ArchiveSection(
                                     "Future Pages",

@@ -6,12 +6,17 @@ import net.minecraft.item.Items;
 import nrd.breached.Breached;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 public final class CraftingTierRules {
     private static final Map<Item, CraftingTier> REQUIRED_TIERS = new HashMap<>();
+    private static final Set<Item> BLOCKED_ITEMS = new HashSet<>();
 
     static {
+        block(Items.ENDER_CHEST);
+
         require(CraftingTier.TIER_1,
                 Items.BOW,
                 Items.GOLDEN_SWORD, Items.GOLDEN_SHOVEL, Items.GOLDEN_PICKAXE, Items.GOLDEN_AXE, Items.GOLDEN_HOE,
@@ -28,6 +33,7 @@ public final class CraftingTierRules {
                 Items.DIAMOND_SPEAR,
                 Items.ENCHANTING_TABLE,
                 Items.BREWING_STAND,
+                Items.GOLDEN_APPLE,
                 Breached.DIAMOND_BREACHER
         );
 
@@ -45,8 +51,18 @@ public final class CraftingTierRules {
     }
 
     public static boolean canCraft(CraftingTier tableTier, ItemStack result) {
+        if (BLOCKED_ITEMS.contains(result.getItem())) {
+            return false;
+        }
+
         CraftingTier requiredTier = REQUIRED_TIERS.getOrDefault(result.getItem(), CraftingTier.TIER_0);
         return tableTier.allows(requiredTier);
+    }
+
+    private static void block(Item... items) {
+        for (Item item : items) {
+            BLOCKED_ITEMS.add(item);
+        }
     }
 
     private static void require(CraftingTier tier, Item... items) {

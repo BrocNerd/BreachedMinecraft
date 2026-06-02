@@ -21,6 +21,7 @@ import net.minecraft.world.gen.chunk.ChunkGeneratorSettings;
 import net.minecraft.world.gen.chunk.NoiseChunkGenerator;
 import net.minecraft.world.gen.WorldPreset;
 import net.minecraft.world.gen.WorldPresets;
+import net.minecraft.world.rule.GameRules;
 import net.minecraft.world.level.ServerWorldProperties;
 import nrd.breached.Breached;
 
@@ -92,6 +93,7 @@ public final class BreachedDimensionRules {
                 0.0F,
                 0.0F
         ));
+        world.getGameRules().setValue(GameRules.RESPAWN_RADIUS, 0, world.getServer());
         System.out.println("[Breached] Applied Town Hall spawn for " + rules.presetId()
                 + ": x " + spawnPos.getX()
                 + ", y " + spawnPos.getY()

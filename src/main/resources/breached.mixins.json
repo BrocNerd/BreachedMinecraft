@@ -5,13 +5,16 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "AbstractFireBlockMixin",
+    "ArmorStandEntityMixin",
     "BlockBreakingDeltaMixin",
     "CraftingScreenHandlerMixin",
+    "EntityMixin",
     "ExplosionBehaviorMixin",
     "FireChargeItemMixin",
     "FlintAndSteelItemMixin",
     "ItemStackMixin",
     "PlayerManagerMixin",
+    "PlayerInventoryMixin",
     "ServerPlayerRespawnMixin",
     "ServerWaypointHandlerMixin"
   ],

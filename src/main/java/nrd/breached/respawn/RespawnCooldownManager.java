@@ -12,6 +12,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.TeleportTarget;
+import net.minecraft.world.World;
 import net.minecraft.world.WorldProperties;
 import net.minecraft.world.attribute.EnvironmentAttributes;
 
@@ -26,10 +27,13 @@ public final class RespawnCooldownManager {
     private static final long BED_RESPAWN_COOLDOWN_MILLIS = 60_000L;
     private static final int MAX_BED_RESPAWN_POINTS = 3;
     private static final String BED_RESPAWN_POINTS_KEY = "breached_bed_respawns";
+    private static final String LEGACY_SELECTED_BED_RESPAWN_KEY = "breached_selected_bed_respawn";
 
     private static final Map<UUID, List<WorldProperties.SpawnPoint>> BED_RESPAWN_POINTS = new HashMap<>();
     private static final Map<UUID, Map<BedRespawnKey, Long>> BED_RESPAWN_COOLDOWNS = new HashMap<>();
     private static final Map<UUID, BedRespawnKey> PENDING_BED_RESPAWNS = new HashMap<>();
+    private static final Map<UUID, BedRespawnKey> REQUESTED_BED_RESPAWNS = new HashMap<>();
+    private static final Map<UUID, Boolean> PENDING_TOWNHALL_RESPAWNS = new HashMap<>();
 
     private RespawnCooldownManager() {
     }
@@ -44,6 +48,7 @@ public final class RespawnCooldownManager {
     }
 
     public static void writeBedRespawns(ServerPlayerEntity player, WriteView view) {
+        view.remove(LEGACY_SELECTED_BED_RESPAWN_KEY);
         List<WorldProperties.SpawnPoint> points = BED_RESPAWN_POINTS.get(player.getUuid());
         if (points == null || points.isEmpty()) {
             view.remove(BED_RESPAWN_POINTS_KEY);
@@ -51,6 +56,84 @@ public final class RespawnCooldownManager {
         }
 
         view.put(BED_RESPAWN_POINTS_KEY, WorldProperties.SpawnPoint.CODEC.listOf(), points);
+    }
+
+    public static List<BlockPos> getSavedOverworldBedPositions(ServerPlayerEntity player) {
+        List<WorldProperties.SpawnPoint> points = BED_RESPAWN_POINTS.get(player.getUuid());
+        if (points == null || points.isEmpty()) {
+            return List.of();
+        }
+
+        return points.stream()
+                .filter(point -> point.getDimension().equals(World.OVERWORLD))
+                .map(point -> point.getPos().toImmutable())
+                .toList();
+    }
+
+    public static List<BedRespawnStatus> getSavedOverworldBedStatuses(ServerPlayerEntity player) {
+        List<WorldProperties.SpawnPoint> points = BED_RESPAWN_POINTS.get(player.getUuid());
+        if (points == null || points.isEmpty()) {
+            return List.of();
+        }
+
+        List<WorldProperties.SpawnPoint> validPoints = points.stream()
+                .filter(point -> isValidBedRespawnPoint(player, point))
+                .toList();
+        if (validPoints.size() != points.size()) {
+            setBedRespawnPoints(player.getUuid(), validPoints);
+        }
+
+        if (validPoints.isEmpty()) {
+            return List.of();
+        }
+
+        List<BedRespawnStatus> statuses = new ArrayList<>();
+        for (int index = 0; index < validPoints.size(); index++) {
+            WorldProperties.SpawnPoint point = validPoints.get(index);
+            if (!point.getDimension().equals(World.OVERWORLD)) {
+                continue;
+            }
+
+            int cooldownRemainingTicks = getBedRespawnCooldownRemainingTicks(player, point);
+            statuses.add(new BedRespawnStatus(
+                    index,
+                    point.getPos().toImmutable(),
+                    cooldownRemainingTicks <= 0,
+                    cooldownRemainingTicks
+            ));
+        }
+
+        return statuses;
+    }
+
+    public static void requestBedRespawn(ServerPlayerEntity player, int bedIndex) {
+        List<WorldProperties.SpawnPoint> points = BED_RESPAWN_POINTS.get(player.getUuid());
+        if (points == null || points.isEmpty()) {
+            REQUESTED_BED_RESPAWNS.remove(player.getUuid());
+            return;
+        }
+
+        if (bedIndex < 0 || bedIndex >= points.size()) {
+            REQUESTED_BED_RESPAWNS.remove(player.getUuid());
+            return;
+        }
+
+        WorldProperties.SpawnPoint requestedPoint = points.get(bedIndex);
+        if (!isValidBedRespawnPoint(player, requestedPoint)) {
+            setBedRespawnPoints(player.getUuid(), points.stream()
+                    .filter(point -> isValidBedRespawnPoint(player, point))
+                    .toList());
+            REQUESTED_BED_RESPAWNS.remove(player.getUuid());
+            return;
+        }
+
+        if (isBedRespawnOnCooldown(player, requestedPoint)) {
+            REQUESTED_BED_RESPAWNS.remove(player.getUuid());
+            return;
+        }
+
+        REQUESTED_BED_RESPAWNS.put(player.getUuid(), BedRespawnKey.from(requestedPoint));
+        PENDING_TOWNHALL_RESPAWNS.remove(player.getUuid());
     }
 
     public static boolean trackBedRespawnPoint(ServerPlayerEntity player, ServerPlayerEntity.Respawn respawn) {
@@ -78,6 +161,12 @@ public final class RespawnCooldownManager {
             ServerPlayerEntity player,
             TeleportTarget.PostDimensionTransition postDimensionTransition
     ) {
+        if (PENDING_TOWNHALL_RESPAWNS.remove(player.getUuid()) != null) {
+            clearPendingBedRespawn(player);
+            REQUESTED_BED_RESPAWNS.remove(player.getUuid());
+            return Optional.of(TeleportTarget.noRespawnPointSet(player, postDimensionTransition));
+        }
+
         ServerPlayerEntity.Respawn currentRespawn = player.getRespawn();
         trackBedRespawnPoint(player, currentRespawn);
 
@@ -100,24 +189,32 @@ public final class RespawnCooldownManager {
                         .toList()
         );
 
-        for (BedRespawnTarget target : validTargets) {
-            if (!isBedRespawnOnCooldown(player, target.point())) {
-                markPendingBedRespawn(player, target.point());
-                return Optional.of(target.teleportTarget());
-            }
+        Optional<BedRespawnTarget> requestedTarget = getRequestedBedRespawnTarget(player, validTargets);
+        if (requestedTarget.isPresent() && !isBedRespawnOnCooldown(player, requestedTarget.get().point())) {
+            markPendingBedRespawn(player, requestedTarget.get().point());
+            return Optional.of(requestedTarget.get().teleportTarget());
         }
 
         clearPendingBedRespawn(player);
 
         if (!validTargets.isEmpty()) {
-            player.sendMessage(Text.literal("All saved beds are on cooldown. Respawning at world spawn."), false);
             return Optional.of(TeleportTarget.noRespawnPointSet(player, postDimensionTransition));
         }
 
         return Optional.empty();
     }
 
+    public static void requestTownhallRespawn(ServerPlayerEntity player) {
+        PENDING_TOWNHALL_RESPAWNS.put(player.getUuid(), true);
+        REQUESTED_BED_RESPAWNS.remove(player.getUuid());
+        clearPendingBedRespawn(player);
+    }
+
     public static void markPendingBedRespawn(ServerPlayerEntity player, ServerPlayerEntity.Respawn respawn) {
+        if (PENDING_BED_RESPAWNS.containsKey(player.getUuid())) {
+            return;
+        }
+
         if (!hasValidBedRespawnPoint(player, respawn)) {
             return;
         }
@@ -173,26 +270,9 @@ public final class RespawnCooldownManager {
     }
 
     private static Optional<Text> createBedRespawnSelectionMessage(ServerPlayerEntity player) {
-        List<WorldProperties.SpawnPoint> points = BED_RESPAWN_POINTS.get(player.getUuid());
-        if (points == null || points.isEmpty()) {
-            return Optional.empty();
-        }
-
-        StringBuilder message = new StringBuilder("New primary bed selected");
-        if (points.size() >= 2) {
-            message.append(", fallback 1 at ").append(formatCoordinates(points.get(1)));
-        }
-        if (points.size() >= 3) {
-            message.append(", fallback 2 at ").append(formatCoordinates(points.get(2)));
-        }
-        message.append(".");
-
-        return Optional.of(Text.literal(message.toString()));
-    }
-
-    private static String formatCoordinates(WorldProperties.SpawnPoint point) {
-        BlockPos pos = point.getPos();
-        return "x " + pos.getX() + ", y " + pos.getY() + ", z " + pos.getZ();
+        return BED_RESPAWN_POINTS.containsKey(player.getUuid())
+                ? Optional.of(Text.literal("New primary bed set."))
+                : Optional.empty();
     }
 
     private static Optional<TeleportTarget> createBedRespawnTarget(
@@ -249,19 +329,24 @@ public final class RespawnCooldownManager {
     }
 
     private static boolean isBedRespawnOnCooldown(ServerPlayerEntity player, WorldProperties.SpawnPoint point) {
+        return getBedRespawnCooldownRemainingTicks(player, point) > 0;
+    }
+
+    private static int getBedRespawnCooldownRemainingTicks(ServerPlayerEntity player, WorldProperties.SpawnPoint point) {
         Map<BedRespawnKey, Long> playerCooldowns = BED_RESPAWN_COOLDOWNS.get(player.getUuid());
         if (playerCooldowns == null) {
-            return false;
+            return 0;
         }
 
         BedRespawnKey key = BedRespawnKey.from(point);
         Long expiresAt = playerCooldowns.get(key);
         if (expiresAt == null) {
-            return false;
+            return 0;
         }
 
-        if (System.currentTimeMillis() < expiresAt) {
-            return true;
+        long now = System.currentTimeMillis();
+        if (now < expiresAt) {
+            return Math.max(1, (int) Math.ceil((expiresAt - now) / 50.0D));
         }
 
         playerCooldowns.remove(key);
@@ -269,11 +354,25 @@ public final class RespawnCooldownManager {
             BED_RESPAWN_COOLDOWNS.remove(player.getUuid());
         }
 
-        return false;
+        return 0;
     }
 
     private static void markPendingBedRespawn(ServerPlayerEntity player, WorldProperties.SpawnPoint point) {
         PENDING_BED_RESPAWNS.put(player.getUuid(), BedRespawnKey.from(point));
+    }
+
+    private static Optional<BedRespawnTarget> getRequestedBedRespawnTarget(ServerPlayerEntity player, List<BedRespawnTarget> targets) {
+        BedRespawnKey requestedKey = REQUESTED_BED_RESPAWNS.remove(player.getUuid());
+        if (requestedKey == null || targets.isEmpty()) {
+            return Optional.empty();
+        }
+
+        return targets.stream()
+                .filter(target -> BedRespawnKey.from(target.point()).equals(requestedKey))
+                .findFirst();
+    }
+
+    public record BedRespawnStatus(int bedIndex, BlockPos pos, boolean available, int cooldownRemainingTicks) {
     }
 
     private static boolean isSameBed(WorldProperties.SpawnPoint left, WorldProperties.SpawnPoint right) {

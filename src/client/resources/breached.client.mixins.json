@@ -4,6 +4,8 @@
   "package": "nrd.breached.mixin.client",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "CreateWorldScreenMixin",
+    "DeathScreenMixin",
     "InGameHudMixin",
     "InventoryScreenMixin",
     "ScreenAccessor"

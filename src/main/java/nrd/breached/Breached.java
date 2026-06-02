@@ -2,6 +2,7 @@ package nrd.breached;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.EntitySleepEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
@@ -28,6 +29,7 @@ import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemGroups;
+import net.minecraft.item.Items;
 import net.minecraft.item.ToolMaterial;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
@@ -47,15 +49,20 @@ import nrd.breached.block.IronCraftingTableBlock;
 import nrd.breached.block.LandlockBlock;
 import nrd.breached.block.LandlockBlockEntity;
 import nrd.breached.block.NetheriteCraftingTableBlock;
+import nrd.breached.combat.AdrenalineManager;
 import nrd.breached.config.BreachedConfig;
 import nrd.breached.item.BreachedArchiveItem;
 import nrd.breached.item.BreacherItem;
 import nrd.breached.landlock.LandlockClaimManager;
+import nrd.breached.landlock.LandlockMapState;
 import nrd.breached.map.BreachedMapSnapshotManager;
 import nrd.breached.network.OpenBreachedArchivePayload;
 import nrd.breached.network.OpenBreachedMapPayload;
 import nrd.breached.network.ReinforcementOutlinePayload;
 import nrd.breached.network.RequestBreachedMapPayload;
+import nrd.breached.network.RequestTownhallRespawnPayload;
+import nrd.breached.network.SelectRespawnBedPayload;
+import nrd.breached.respawn.InitialTownhallSpawnManager;
 import nrd.breached.reinforcement.ReinforcementManager;
 import nrd.breached.reinforcement.ReinforcementTier;
 import nrd.breached.respawn.RespawnCooldownManager;
@@ -67,6 +74,7 @@ import nrd.breached.worldgen.BreachedStructurePlacementManager;
 
 import java.util.HashMap;
 import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -80,6 +88,12 @@ public class Breached implements ModInitializer {
     private static final Map<UUID, ProbeLandlockSelection> PROBE_LANDLOCK_SELECTIONS = new HashMap<>();
     private static final Map<UUID, ReinforcementOutlineTarget> REINFORCEMENT_OUTLINE_TARGETS = new HashMap<>();
     private static final int BREACHED_MAP_TEAMMATE_COLOR = 0xFF5AE6FF;
+    private static final int BREACHED_MAP_LANDLOCK_COLOR = 0xFF7CFF8A;
+    private static final int BREACHED_MAP_BED_COLOR = 0xFF39FF14;
+    private static final int BREACHED_MAP_DEATH_COLOR = 0xFFFF3B30;
+    private static final int DEATH_MARKER_MIN_Y = 0;
+    private static final int DEATH_MARKER_DURATION_TICKS = 20 * 60;
+    private static final List<DeathMapMarker> DEATH_MAP_MARKERS = new ArrayList<>();
 
     public static final Block TIER_1_CRAFTING_BENCH = registerBlock(
             "tier_1_crafting_bench",
@@ -179,16 +193,24 @@ public class Breached implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(OpenBreachedArchivePayload.ID, OpenBreachedArchivePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(OpenBreachedMapPayload.ID, OpenBreachedMapPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(RequestBreachedMapPayload.ID, RequestBreachedMapPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(RequestTownhallRespawnPayload.ID, RequestTownhallRespawnPayload.CODEC);
+        PayloadTypeRegistry.playC2S().register(SelectRespawnBedPayload.ID, SelectRespawnBedPayload.CODEC);
         TeamCommands.register();
         registerLandlockDebugEvents();
         registerLandlockProtectionEvents();
         registerLandlockPlacementProtectionEvents();
         registerLandlockDoorProtectionEvents();
+        registerEnderChestRemovalEvents();
         registerRespawnEvents();
+        InitialTownhallSpawnManager.register();
         registerStarterItemEvents();
         registerBreachedMapNetworking();
+        registerRespawnBedSelectionNetworking();
+        registerTownhallRespawnNetworking();
+        registerDeathMapMarkers();
         registerVillagerTradingLock();
         BreachedDimensionRules.register();
+        AdrenalineManager.register();
         LowYHealthLimitManager.register();
         BreachedMapSnapshotManager.register();
         registerReinforcementEvents();
@@ -243,6 +265,9 @@ public class Breached implements ModInitializer {
                     ))
                     .toList();
             List<OpenBreachedMapPayload.Teammate> teammates = getBreachedMapTeammates(player, server, overworld);
+            List<OpenBreachedMapPayload.Landlock> landlocks = getBreachedMapLandlocks(player, overworld);
+            List<OpenBreachedMapPayload.Bed> beds = getBreachedMapBeds(player);
+            List<OpenBreachedMapPayload.DeathMarker> deathMarkers = getBreachedMapDeathMarkers(overworld);
 
             ServerPlayNetworking.send(player, new OpenBreachedMapPayload(
                     borderSize,
@@ -251,9 +276,119 @@ public class Breached implements ModInitializer {
                     terrainSnapshot.resolution(),
                     terrainSnapshot.colors(),
                     markers,
-                    teammates
+                    teammates,
+                    landlocks,
+                    beds,
+                    deathMarkers
             ));
         });
+    }
+
+    private static void registerRespawnBedSelectionNetworking() {
+        ServerPlayNetworking.registerGlobalReceiver(SelectRespawnBedPayload.ID, (payload, context) -> {
+            ServerPlayerEntity player = context.player();
+            MinecraftServer server = player.getEntityWorld().getServer();
+            if (server == null || !BreachedDimensionRules.isBreachedIslandWorld(server)) {
+                return;
+            }
+
+            RespawnCooldownManager.requestBedRespawn(player, payload.bedIndex());
+        });
+    }
+
+    private static void registerTownhallRespawnNetworking() {
+        ServerPlayNetworking.registerGlobalReceiver(RequestTownhallRespawnPayload.ID, (payload, context) -> {
+            ServerPlayerEntity player = context.player();
+            MinecraftServer server = player.getEntityWorld().getServer();
+            if (server == null || !BreachedDimensionRules.isBreachedIslandWorld(server)) {
+                return;
+            }
+
+            RespawnCooldownManager.requestTownhallRespawn(player);
+        });
+    }
+
+    private static void registerDeathMapMarkers() {
+        ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
+            if (!(entity instanceof ServerPlayerEntity player) || !(player.getEntityWorld() instanceof ServerWorld world)) {
+                return;
+            }
+
+            MinecraftServer server = world.getServer();
+            if (server == null
+                    || !world.getRegistryKey().equals(World.OVERWORLD)
+                    || !BreachedDimensionRules.isBreachedIslandWorld(server)
+                    || player.getY() >= DEATH_MARKER_MIN_Y) {
+                return;
+            }
+
+            DEATH_MAP_MARKERS.add(new DeathMapMarker(
+                    "Death: " + player.getGameProfile().name(),
+                    (int) Math.round(player.getX()),
+                    (int) Math.round(player.getZ()),
+                    world.getTime() + DEATH_MARKER_DURATION_TICKS
+            ));
+            server.getPlayerManager().broadcast(Text.literal(
+                    player.getGameProfile().name() + " died below Y 0. Their death is marked on the Breached Map for 1 minute."
+            ).formatted(net.minecraft.util.Formatting.RED), false);
+        });
+    }
+
+    private static List<OpenBreachedMapPayload.DeathMarker> getBreachedMapDeathMarkers(ServerWorld overworld) {
+        long worldTime = overworld.getTime();
+        DEATH_MAP_MARKERS.removeIf(marker -> marker.expiresAtWorldTime() <= worldTime);
+        return DEATH_MAP_MARKERS.stream()
+                .map(marker -> new OpenBreachedMapPayload.DeathMarker(
+                        marker.label(),
+                        marker.x(),
+                        marker.z(),
+                        BREACHED_MAP_DEATH_COLOR,
+                        (int) Math.max(1L, marker.expiresAtWorldTime() - worldTime)
+                ))
+                .toList();
+    }
+
+    private static List<OpenBreachedMapPayload.Landlock> getBreachedMapLandlocks(ServerPlayerEntity player, ServerWorld overworld) {
+        LandlockMapState landlockState = LandlockMapState.get(overworld.getServer());
+        landlockState.backfillLoadedLandlocks(overworld);
+
+        List<LandlockMapState.Entry> authorizedLandlocks = landlockState.getAuthorizedLandlocks(player.getUuid());
+        java.util.ArrayList<OpenBreachedMapPayload.Landlock> mapLandlocks = new java.util.ArrayList<>(authorizedLandlocks.size());
+        for (int index = 0; index < authorizedLandlocks.size(); index++) {
+            LandlockMapState.Entry entry = authorizedLandlocks.get(index);
+            mapLandlocks.add(new OpenBreachedMapPayload.Landlock(
+                    "Landlock " + (index + 1),
+                    entry.pos().getX(),
+                    entry.pos().getZ(),
+                    BREACHED_MAP_LANDLOCK_COLOR
+            ));
+        }
+
+        return mapLandlocks;
+    }
+
+    private static List<OpenBreachedMapPayload.Bed> getBreachedMapBeds(ServerPlayerEntity player) {
+        List<RespawnCooldownManager.BedRespawnStatus> bedStatuses = RespawnCooldownManager.getSavedOverworldBedStatuses(player);
+        java.util.ArrayList<OpenBreachedMapPayload.Bed> beds = new java.util.ArrayList<>(bedStatuses.size());
+        for (int index = 0; index < bedStatuses.size(); index++) {
+            RespawnCooldownManager.BedRespawnStatus status = bedStatuses.get(index);
+            BlockPos bedPos = status.pos();
+            beds.add(new OpenBreachedMapPayload.Bed(
+                    getBreachedMapBedLabel(index),
+                    status.bedIndex(),
+                    bedPos.getX(),
+                    bedPos.getZ(),
+                    BREACHED_MAP_BED_COLOR,
+                    status.available(),
+                    status.cooldownRemainingTicks()
+            ));
+        }
+
+        return beds;
+    }
+
+    private static String getBreachedMapBedLabel(int index) {
+        return "Bed " + (index + 1);
     }
 
     private static List<OpenBreachedMapPayload.Teammate> getBreachedMapTeammates(ServerPlayerEntity player, MinecraftServer server, ServerWorld overworld) {
@@ -450,6 +585,10 @@ public class Breached implements ModInitializer {
                 return;
             }
 
+            if (state.isOf(LANDLOCK_BLOCK)) {
+                LandlockMapState.remove(serverWorld, pos);
+            }
+
             if (player.getMainHandStack().getItem() instanceof BreacherItem && !player.isCreative()) {
                 return;
             }
@@ -605,6 +744,32 @@ public class Breached implements ModInitializer {
                 || block instanceof FenceGateBlock;
     }
 
+    private static void registerEnderChestRemovalEvents() {
+        UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+            boolean clickedEnderChest = world.getBlockState(hitResult.getBlockPos()).isOf(Blocks.ENDER_CHEST);
+            boolean holdingEnderChest = player.getStackInHand(hand).isOf(Items.ENDER_CHEST);
+            if (!clickedEnderChest && !holdingEnderChest) {
+                return ActionResult.PASS;
+            }
+
+            if (!world.isClient()) {
+                player.sendMessage(Text.literal("Ender Chests are disabled in Breached."), false);
+            }
+
+            return ActionResult.FAIL;
+        });
+
+        PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) -> {
+            if (world.isClient() || !state.isOf(Blocks.ENDER_CHEST)) {
+                return true;
+            }
+
+            world.breakBlock(pos, false, player);
+            player.sendMessage(Text.literal("Ender Chests are disabled in Breached."), false);
+            return false;
+        });
+    }
+
     private static void registerLandlockDebugEvents() {
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
             if (world.isClient() || hand != Hand.MAIN_HAND || !player.getMainHandStack().isOf(PROBE)) {
@@ -676,6 +841,9 @@ public class Breached implements ModInitializer {
         }
 
         landlock.setClaimCenter(newClaimCenter);
+        if (world instanceof ServerWorld serverWorld) {
+            LandlockMapState.update(serverWorld, landlock);
+        }
         PROBE_LANDLOCK_SELECTIONS.remove(player.getUuid());
         player.sendMessage(Text.literal("Landlock claim center set to x "
                 + newClaimCenter.getX()
@@ -685,6 +853,9 @@ public class Breached implements ModInitializer {
     }
 
     private record ProbeLandlockSelection(RegistryKey<World> worldKey, BlockPos landlockPos) {
+    }
+
+    private record DeathMapMarker(String label, int x, int z, long expiresAtWorldTime) {
     }
 
     private record ReinforcementOutlineTarget(List<ReinforcementOutlinePayload.Entry> entries) {
