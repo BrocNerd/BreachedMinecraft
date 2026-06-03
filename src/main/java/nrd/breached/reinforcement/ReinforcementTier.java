@@ -11,7 +11,7 @@ public enum ReinforcementTier {
     WOOD(0, "Wood", 16, 16),
     IRON(1, "Iron", 64, 4),
     DIAMOND(2, "Diamond", 256, 2),
-    NETHERITE(3, "Netherite", 1024, 1);
+    NETHERITE(3, "Netherite", 512, 1);
 
     private final int level;
     private final String displayName;

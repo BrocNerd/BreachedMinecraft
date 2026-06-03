@@ -10,6 +10,7 @@
     "CraftingScreenHandlerMixin",
     "EntityMixin",
     "ExplosionBehaviorMixin",
+    "ExplosionImplMixin",
     "FireChargeItemMixin",
     "FlintAndSteelItemMixin",
     "ItemStackMixin",

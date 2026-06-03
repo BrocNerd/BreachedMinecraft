@@ -15,6 +15,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.gui.screen.DeathScreen;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.ingame.HandledScreens;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.util.math.MatrixStack;
@@ -35,6 +36,7 @@ import net.minecraft.util.shape.VoxelShapes;
 import nrd.breached.Breached;
 import nrd.breached.client.screen.BreachedArchiveScreen;
 import nrd.breached.client.screen.BreachedMapScreen;
+import nrd.breached.client.screen.LandlockScreen;
 import nrd.breached.item.BreacherItem;
 import nrd.breached.network.LandlockClaimOutlinePayload;
 import nrd.breached.network.OpenBreachedArchivePayload;
@@ -70,8 +72,12 @@ public class BreachedClient implements ClientModInitializer {
                     .build()
     );
     private static final KeyBinding.Category BREACHED_KEY_CATEGORY = KeyBinding.Category.create(Identifier.of(Breached.MOD_ID, "breached"));
+    private static final long BREACHED_MAP_REQUEST_COOLDOWN_MILLIS = 2_000L;
     private static Screen pendingBreachedMapParentScreen;
     private static boolean pendingBreachedMapRespawnOnBedSelect;
+    private static OpenBreachedMapPayload cachedBreachedMapPayload;
+    private static long cachedBreachedMapReceivedAtMillis;
+    private static long lastBreachedMapServerRequestMillis;
     private static boolean suppressMapKeyOpenUntilReleased;
     private static boolean suppressArchiveKeyOpenUntilReleased;
     private static KeyBinding openBreachedMapKeyBinding;
@@ -79,6 +85,7 @@ public class BreachedClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        HandledScreens.register(Breached.LANDLOCK_SCREEN_HANDLER, LandlockScreen::new);
         registerBreachedMapKeyBinding();
         registerBreachedArchiveKeyBinding();
         registerArchiveReceiver();
@@ -86,7 +93,7 @@ public class BreachedClient implements ClientModInitializer {
         registerReinforcementOutlineReceiver();
         registerLandlockClaimOutlineReceiver();
         registerReinforcementOutlineRenderer();
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> clearOutlines());
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> clearClientSessionCache());
     }
 
     private static void registerArchiveReceiver() {
@@ -100,26 +107,65 @@ public class BreachedClient implements ClientModInitializer {
             boolean respawnOnBedSelect = pendingBreachedMapRespawnOnBedSelect;
             pendingBreachedMapParentScreen = null;
             pendingBreachedMapRespawnOnBedSelect = false;
+            if (!respawnOnBedSelect) {
+                cachedBreachedMapPayload = payload;
+                cachedBreachedMapReceivedAtMillis = System.currentTimeMillis();
+            }
             context.client().setScreen(new BreachedMapScreen(payload, parentScreen, respawnOnBedSelect));
         });
     }
 
     public static void requestBreachedMap() {
-        pendingBreachedMapParentScreen = MinecraftClient.getInstance().currentScreen;
-        pendingBreachedMapRespawnOnBedSelect = false;
-        ClientPlayNetworking.send(RequestBreachedMapPayload.INSTANCE);
+        Screen parentScreen = MinecraftClient.getInstance().currentScreen;
+        if (tryOpenCachedBreachedMap(parentScreen)) {
+            return;
+        }
+
+        requestBreachedMapFromServer(parentScreen, false);
     }
 
     public static void requestDeathRespawnMap(Screen parentScreen) {
-        pendingBreachedMapParentScreen = parentScreen;
-        pendingBreachedMapRespawnOnBedSelect = true;
-        ClientPlayNetworking.send(RequestBreachedMapPayload.INSTANCE);
+        requestBreachedMapFromServer(parentScreen, true);
     }
 
     public static void refreshBreachedMap(Screen parentScreen, boolean respawnOnBedSelect) {
+        if (!respawnOnBedSelect && tryOpenCachedBreachedMap(parentScreen)) {
+            return;
+        }
+
+        requestBreachedMapFromServer(parentScreen, respawnOnBedSelect);
+    }
+
+    private static void requestBreachedMapFromServer(Screen parentScreen, boolean respawnOnBedSelect) {
+        long now = System.currentTimeMillis();
+        if (!respawnOnBedSelect && now - lastBreachedMapServerRequestMillis < BREACHED_MAP_REQUEST_COOLDOWN_MILLIS) {
+            return;
+        }
+
         pendingBreachedMapParentScreen = parentScreen;
         pendingBreachedMapRespawnOnBedSelect = respawnOnBedSelect;
+        if (!respawnOnBedSelect) {
+            lastBreachedMapServerRequestMillis = now;
+        }
         ClientPlayNetworking.send(RequestBreachedMapPayload.INSTANCE);
+    }
+
+    private static boolean tryOpenCachedBreachedMap(Screen parentScreen) {
+        if (cachedBreachedMapPayload == null || !isBreachedMapCacheFresh()) {
+            return false;
+        }
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.currentScreen instanceof BreachedMapScreen) {
+            return true;
+        }
+
+        client.setScreen(new BreachedMapScreen(cachedBreachedMapPayload, parentScreen, false));
+        return true;
+    }
+
+    private static boolean isBreachedMapCacheFresh() {
+        return System.currentTimeMillis() - cachedBreachedMapReceivedAtMillis < BREACHED_MAP_REQUEST_COOLDOWN_MILLIS;
     }
 
     public static void openBreachedArchive() {
@@ -243,7 +289,7 @@ public class BreachedClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(LandlockClaimOutlinePayload.ID, (payload, context) ->
                 claimOutlineTargets = payload.entries()
                         .stream()
-                        .map(entry -> new LandlockClaimOutlineTarget(entry.claimCenter().toImmutable(), entry.authorized()))
+                        .map(entry -> new LandlockClaimOutlineTarget(entry.claimCenter().toImmutable(), entry.authorized(), entry.lockdown(), entry.decayed()))
                         .toList());
     }
 
@@ -251,6 +297,15 @@ public class BreachedClient implements ClientModInitializer {
         outlineTargets = List.of();
         claimOutlineTargets = List.of();
         ReinforcementVisibilityCache.clear();
+    }
+
+    private static void clearClientSessionCache() {
+        clearOutlines();
+        cachedBreachedMapPayload = null;
+        cachedBreachedMapReceivedAtMillis = 0L;
+        lastBreachedMapServerRequestMillis = 0L;
+        pendingBreachedMapParentScreen = null;
+        pendingBreachedMapRespawnOnBedSelect = false;
     }
 
     private static void registerReinforcementOutlineRenderer() {
@@ -366,17 +421,29 @@ public class BreachedClient implements ClientModInitializer {
         double minX = center.getX() - 8 - cameraPos.x;
         double minY = center.getY() - 8 - cameraPos.y;
         double minZ = center.getZ() - 8 - cameraPos.z;
-        int color = target.authorized()
-                ? ColorHelper.fromFloats(alpha, 0.22F, 1.0F, 0.42F)
-                : ColorHelper.fromFloats(alpha, 1.0F, 0.28F, 0.22F);
+        int color = claimOutlineColor(target, alpha);
         float lineWidth = MinecraftClient.getInstance().getWindow().getMinimumLineWidth() * lineWidthMultiplier;
 
         VertexRendering.drawOutline(matrices, consumer, LANDLOCK_CLAIM_OUTLINE_SHAPE, minX, minY, minZ, color, lineWidth);
     }
 
+    private static int claimOutlineColor(LandlockClaimOutlineTarget target, float alpha) {
+        if (target.decayed()) {
+            return ColorHelper.fromFloats(alpha, 0.55F, 0.55F, 0.55F);
+        }
+
+        if (target.lockdown()) {
+            return ColorHelper.fromFloats(alpha, 0.42F, 0.0F, 0.0F);
+        }
+
+        return target.authorized()
+                ? ColorHelper.fromFloats(alpha, 0.22F, 1.0F, 0.42F)
+                : ColorHelper.fromFloats(alpha, 1.0F, 0.28F, 0.22F);
+    }
+
     private record ReinforcementOutlineTarget(BlockPos pos, ReinforcementTier tier) {
     }
 
-    private record LandlockClaimOutlineTarget(BlockPos claimCenter, boolean authorized) {
+    private record LandlockClaimOutlineTarget(BlockPos claimCenter, boolean authorized, boolean lockdown, boolean decayed) {
     }
 }

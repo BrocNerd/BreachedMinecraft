@@ -39,7 +39,9 @@ public final class BreachedMapSnapshotManager {
         }
 
         snapshot.markRequested(worldTime);
-        snapshot.sampleLoadedChunks(world);
+        if (!snapshot.complete()) {
+            snapshot.sampleLoadedChunks(world);
+        }
         return snapshot.toPayloadSnapshot();
     }
 
@@ -173,14 +175,7 @@ public final class BreachedMapSnapshotManager {
         }
 
         private TerrainSnapshot toPayloadSnapshot() {
-            byte[] payloadColors = colors.clone();
-            for (int index = 0; index < sampledPixels.length; index++) {
-                if (!sampledPixels[index]) {
-                    writeRgb565(payloadColors, index, getFallbackTerrainColor(index % TERRAIN_RESOLUTION, index / TERRAIN_RESOLUTION));
-                }
-            }
-
-            return new TerrainSnapshot(TERRAIN_RESOLUTION, payloadColors);
+            return new TerrainSnapshot(TERRAIN_RESOLUTION, colors);
         }
 
         private void sampleLoadedChunks(ServerWorld world) {

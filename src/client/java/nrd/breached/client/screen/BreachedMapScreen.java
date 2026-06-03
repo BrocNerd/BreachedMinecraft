@@ -8,10 +8,13 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.NativeImageBackedTexture;
 import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import nrd.breached.Breached;
 import nrd.breached.client.BreachedClient;
+import nrd.breached.mixin.client.KeyBindingAccessor;
 import nrd.breached.network.OpenBreachedMapPayload;
 
 import java.util.ArrayList;
@@ -180,6 +183,12 @@ public class BreachedMapScreen extends Screen {
     }
 
     @Override
+    public void tick() {
+        super.tick();
+        updateMovementKeybinds();
+    }
+
+    @Override
     public boolean shouldPause() {
         return false;
     }
@@ -197,6 +206,30 @@ public class BreachedMapScreen extends Screen {
         }
 
         super.close();
+    }
+
+    private void updateMovementKeybinds() {
+        if (respawnOnBedSelect || client == null || client.player == null) {
+            return;
+        }
+
+        updateMovementKey(client.options.forwardKey);
+        updateMovementKey(client.options.backKey);
+        updateMovementKey(client.options.leftKey);
+        updateMovementKey(client.options.rightKey);
+        updateMovementKey(client.options.jumpKey);
+        updateMovementKey(client.options.sneakKey);
+        updateMovementKey(client.options.sprintKey);
+    }
+
+    private void updateMovementKey(KeyBinding keyBinding) {
+        KeyBindingAccessor accessor = (KeyBindingAccessor) keyBinding;
+        if (!accessor.breached$shouldSetOnGameFocus()) {
+            return;
+        }
+
+        InputUtil.Key boundKey = accessor.breached$getBoundKey();
+        keyBinding.setPressed(InputUtil.isKeyPressed(client.getWindow(), boundKey.getCode()));
     }
 
     private void renderCloseIcon(DrawContext context, int mouseX, int mouseY) {
@@ -594,12 +627,14 @@ public class BreachedMapScreen extends Screen {
     }
 
     private void renderPlayer(DrawContext context, int left, int top, int size, List<LabelBounds> occupiedBounds) {
-        if (!isInsideBorder(payload.playerX(), payload.playerZ())) {
+        double playerX = currentPlayerX();
+        double playerZ = currentPlayerZ();
+        if (!isInsideBorder(playerX, playerZ)) {
             return;
         }
 
-        int x = (int) Math.round(worldToScreenX(payload.playerX(), left, size));
-        int y = (int) Math.round(worldToScreenZ(payload.playerZ(), top, size));
+        int x = (int) Math.round(worldToScreenX(playerX, left, size));
+        int y = (int) Math.round(worldToScreenZ(playerZ, top, size));
         if (!isInsideMap(x, y)) {
             return;
         }
@@ -700,7 +735,31 @@ public class BreachedMapScreen extends Screen {
     }
 
     private Text getCoordinateText() {
-        return Text.literal("You: X " + payload.playerX() + "  Z " + payload.playerZ());
+        return Text.literal("You: X " + currentPlayerBlockX() + "  Z " + currentPlayerBlockZ());
+    }
+
+    private double currentPlayerX() {
+        if (!respawnOnBedSelect && client != null && client.player != null) {
+            return client.player.getX();
+        }
+
+        return payload.playerX();
+    }
+
+    private double currentPlayerZ() {
+        if (!respawnOnBedSelect && client != null && client.player != null) {
+            return client.player.getZ();
+        }
+
+        return payload.playerZ();
+    }
+
+    private int currentPlayerBlockX() {
+        return (int) Math.floor(currentPlayerX());
+    }
+
+    private int currentPlayerBlockZ() {
+        return (int) Math.floor(currentPlayerZ());
     }
 
     private int getClickedBedListIndex(double mouseX, double mouseY) {

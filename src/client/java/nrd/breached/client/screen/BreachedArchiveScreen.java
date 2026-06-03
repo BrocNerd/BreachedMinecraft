@@ -33,6 +33,7 @@ public class BreachedArchiveScreen extends Screen {
     private static final int NAV_WIDTH = 112;
     private static final int PADDING = 12;
     private static final int LINE_HEIGHT = 10;
+    private static final int TAB_SPACING = 21;
     private static final int RECIPE_TOGGLE_HEIGHT = 17;
     private static final int RECIPE_CARD_HEIGHT = 84;
     private static final int SLOT_SIZE = 20;
@@ -65,7 +66,7 @@ public class BreachedArchiveScreen extends Screen {
                     List.of(
                             new ArchiveSection(
                                     "Landlock Blocks",
-                                    "Drop a Landlock Block near the heart of your base to claim a 17x17x17 cube. You are authorized automatically when you place it. Other players can right-click the Landlock Block to authorize themselves, or sneak-right-click it to deauthorize themselves. All authorized players can build, break, and manage the claimed area. Only Landlock owners can break a landlock block without a breacher.\n" +
+                                    "Drop a Landlock Block near the heart of your base to claim a 17x17x17 cube. You are authorized automatically when you place it. Authorized players can right-click the Landlock Block to manage it. Other players can sneak-right-click it to authorize themselves, and authorized players can sneak-right-click it again to leave. All authorized players can build, break, and manage the claimed area. Only Landlock owners can break a landlock block without a breacher.\n" +
                                             "\n" +
                                             "Unauthorized players cannot break or place blocks inside the claim without a breacher, but they can still open any chests or furnaces. If they can get inside, they will take your stuff!",
                                     List.of(recipe(
@@ -83,7 +84,7 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Claim Control",
-                                    "Hold a Probe to see claims you are authorized on. The Diamond Probe also shows enemy claims, making it useful for scouting raids. IMPORTANT: Probes allow you to move your claim center. Sneak-right-click your Landlock with a Probe, then right-click a block inside that claim to move the center there. The new center must stay inside the current 17x17x17 cube.",
+                                    "Hold a Probe to see claims you are authorized on. The Diamond Probe also shows enemy claims, making it useful for scouting raids. Enemy claims in Lockdown show with a dark red outline. IMPORTANT: Probes allow you to move your claim center. Sneak-right-click your Landlock with a Probe, then right-click a block inside that claim to move the center there. The new center must stay inside the current 17x17x17 cube.",
                                     List.of(
                                             recipe(
                                                     "probe",
@@ -118,6 +119,28 @@ public class BreachedArchiveScreen extends Screen {
                             new ArchiveSection(
                                     "Removing Your Landlock",
                                     "Want your Landlock back? The owner must break it with a Reinforcer. Punching it will not do the job because Landlocks are always wood reinforced."
+                            )
+                    )
+            ),
+            new ArchivePage(
+                    "Upkeep",
+                    "Landlock Upkeep",
+                    List.of(
+                            new ArchiveSection(
+                                    "Paying Upkeep",
+                                    "Right-click a Landlock you are authorized on and put upkeep materials into its storage. Copper, iron, gold, redstone, lapis, emeralds, and diamonds all work. Loose items are worth 1 point each, and block forms are worth 9 points each."
+                            ),
+                            new ArchiveSection(
+                                    "Reading the Landlock",
+                                    "Size is the upkeep size of your claimed base. Normal blocks add 1 size. Wood, iron, diamond, and netherite reinforced blocks count as 2, 4, 8, and 16. Cost is the daily upkeep cost, rounded up from Size divided by 20. Stored is your banked upkeep. Protected is how long the claim can stay safe with what is stored."
+                            ),
+                            new ArchiveSection(
+                                    "Decay",
+                                    "If Stored runs out, the Landlock becomes Decayed. Normal, non-reinforced blocks inside the claim can be broken normally. Reinforced blocks still need Breachers, but cost half durability. Decay overrides Lockdown, and probes show Decayed claims in gray."
+                            ),
+                            new ArchiveSection(
+                                    "Base Planning",
+                                    "A compact base is easier to keep protected. A bigger or heavily reinforced base can still be worth it, but it needs a bigger upkeep bank. Before logging off, check Protected and leave yourself enough time to come back."
                             )
                     )
             ),
@@ -157,11 +180,15 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Durability",
-                                    "Treat Breacher durability is scarce. Iron is for early raids, Diamond lasts much longer, and Netherite is the serious raid tool. Normal block mining costs 4 durability."
+                                    "Treat Breacher durability as scarce. Iron is for early raids, Diamond lasts much longer, and Netherite is the serious raid tool. Normal block mining costs 4 durability."
                             ),
                             new ArchiveSection(
                                     "Reinforced Blocks",
-                                    "Reinforcement is what makes walls expensive to break. Wood costs 16 Breacher durability, iron costs 64, diamond costs 256, and netherite costs 1024."
+                                    "Reinforcement is what makes walls expensive to break. Wood costs 16 Breacher durability, iron costs 64, diamond costs 256, and netherite costs 512."
+                            ),
+                            new ArchiveSection(
+                                    "Lockdown",
+                                    "If no authorized player for a Landlock is online, the claim enters Lockdown. Enemy Breachers spend double durability: normal blocks cost 8, wood costs 32, iron costs 128, diamond costs 512, and netherite costs 1024."
                             ),
                             new ArchiveSection(
                                     "Failed Breaches",
@@ -243,9 +270,11 @@ public class BreachedArchiveScreen extends Screen {
                     List.of(
                             new ArchiveSection(
                                     "Beds",
-                                    "Beds are for recovery, not skipping danger, so they don't skip night. You can save up to three beds. When you die, the Breached Map opens so you can choose where to respawn.\n" +
-                                            "\n" +
-                                            "Press M to open the Breached Map while alive."
+                                    "Beds are for recovery, not skipping danger, so they don't skip night. You can save up to three beds. When you die, the Breached Map opens so you can choose where to respawn."
+                            ),
+                            new ArchiveSection(
+                                    "Maps",
+                                    "Press M to open the Breached Map while alive."
                             ),
                             new ArchiveSection(
                                     "Dimensions",
@@ -311,7 +340,7 @@ public class BreachedArchiveScreen extends Screen {
                             Text.literal(PAGES.get(index).tabName()),
                             pressed -> setActivePage(pageIndex)
                     )
-                    .dimensions(tabX, tabY + index * 23, tabWidth, 20)
+                    .dimensions(tabX, tabY + index * TAB_SPACING, tabWidth, 20)
                     .build();
             tabButtons.add(button);
             addDrawableChild(button);

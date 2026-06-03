@@ -35,9 +35,14 @@ import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
+import net.minecraft.resource.featuretoggle.FeatureSet;
+import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvent;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
@@ -49,6 +54,7 @@ import nrd.breached.block.IronCraftingTableBlock;
 import nrd.breached.block.LandlockBlock;
 import nrd.breached.block.LandlockBlockEntity;
 import nrd.breached.block.NetheriteCraftingTableBlock;
+import nrd.breached.breach.BreachNotificationManager;
 import nrd.breached.combat.AdrenalineManager;
 import nrd.breached.config.BreachedConfig;
 import nrd.breached.item.BreachedArchiveItem;
@@ -67,6 +73,7 @@ import nrd.breached.respawn.InitialTownhallSpawnManager;
 import nrd.breached.reinforcement.ReinforcementManager;
 import nrd.breached.reinforcement.ReinforcementTier;
 import nrd.breached.respawn.RespawnCooldownManager;
+import nrd.breached.screen.LandlockScreenHandler;
 import nrd.breached.team.TeamCommands;
 import nrd.breached.team.TeamData;
 import nrd.breached.team.TeamState;
@@ -87,10 +94,18 @@ public class Breached implements ModInitializer {
     private static final int REINFORCEMENT_OUTLINE_RADIUS = 16;
     private static final int LANDLOCK_CLAIM_OUTLINE_RADIUS = 64;
     private static final int REINFORCEMENT_OUTLINE_SYNC_INTERVAL_TICKS = 5;
+    private static final int OUTLINE_STATIONARY_REFRESH_INTERVAL_TICKS = 20;
+    private static final int OUTLINE_TOOL_MODE_REINFORCEMENT = 1;
+    private static final int OUTLINE_TOOL_MODE_PROBE = 2;
+    private static final int OUTLINE_TOOL_MODE_DIAMOND_PROBE = 3;
+    private static final int BREACHED_MAP_REQUEST_COOLDOWN_TICKS = 20 * 2;
     private static final Map<UUID, Long> LAST_VILLAGER_TRADE_MESSAGE_TICKS = new HashMap<>();
     private static final Map<UUID, ProbeLandlockSelection> PROBE_LANDLOCK_SELECTIONS = new HashMap<>();
     private static final Map<UUID, ReinforcementOutlineTarget> REINFORCEMENT_OUTLINE_TARGETS = new HashMap<>();
     private static final Map<UUID, LandlockClaimOutlineTarget> LANDLOCK_CLAIM_OUTLINE_TARGETS = new HashMap<>();
+    private static final Map<UUID, OutlineSyncSource> REINFORCEMENT_OUTLINE_SYNC_SOURCES = new HashMap<>();
+    private static final Map<UUID, OutlineSyncSource> LANDLOCK_CLAIM_OUTLINE_SYNC_SOURCES = new HashMap<>();
+    private static final Map<UUID, Integer> BREACHED_MAP_LAST_REQUEST_TICKS = new HashMap<>();
     private static final int BREACHED_MAP_TEAMMATE_COLOR = 0xFF5AE6FF;
     private static final int BREACHED_MAP_LANDLOCK_COLOR = 0xFF7CFF8A;
     private static final int BREACHED_MAP_BED_COLOR = 0xFF39FF14;
@@ -128,6 +143,15 @@ public class Breached implements ModInitializer {
             Identifier.of(MOD_ID, "landlock_block"),
             FabricBlockEntityTypeBuilder.create(LandlockBlockEntity::new, LANDLOCK_BLOCK).build()
     );
+
+    public static final ScreenHandlerType<LandlockScreenHandler> LANDLOCK_SCREEN_HANDLER = Registry.register(
+            Registries.SCREEN_HANDLER,
+            Identifier.of(MOD_ID, "landlock"),
+            new ScreenHandlerType<>(LandlockScreenHandler::new, FeatureSet.empty())
+    );
+
+    public static final SoundEvent BREACH_ALARM_SOUND = registerSoundEvent("breach_alarm", 320.0F);
+    public static final SoundEvent REINFORCED_BREACH_ALARM_SOUND = registerSoundEvent("reinforced_breach_alarm", 384.0F);
 
     public static final Item IRON_BREACHER = registerItem(
             "iron_breacher",
@@ -177,6 +201,11 @@ public class Breached implements ModInitializer {
         return Registry.register(Registries.ITEM, id, itemFactory.apply(settings.registryKey(itemKey)));
     }
 
+    private static SoundEvent registerSoundEvent(String name, float fixedRange) {
+        Identifier id = Identifier.of(MOD_ID, name);
+        return Registry.register(Registries.SOUND_EVENT, id, SoundEvent.of(id, fixedRange));
+    }
+
     private static Block registerBlock(String name, Function<AbstractBlock.Settings, Block> blockFactory, AbstractBlock.Settings settings) {
         Identifier id = Identifier.of(MOD_ID, name);
         RegistryKey<Block> blockKey = RegistryKey.of(RegistryKeys.BLOCK, id);
@@ -224,6 +253,7 @@ public class Breached implements ModInitializer {
         AdrenalineManager.register();
         LowYHealthLimitManager.register();
         BreachedMapSnapshotManager.register();
+        BreachNotificationManager.register();
         registerReinforcementEvents();
         registerReinforcementOutlineSync();
 
@@ -257,10 +287,16 @@ public class Breached implements ModInitializer {
     }
 
     private static void registerBreachedMapNetworking() {
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
+                BREACHED_MAP_LAST_REQUEST_TICKS.remove(handler.player.getUuid()));
+
         ServerPlayNetworking.registerGlobalReceiver(RequestBreachedMapPayload.ID, (payload, context) -> {
             ServerPlayerEntity player = context.player();
             MinecraftServer server = player.getEntityWorld().getServer();
             if (server == null || !BreachedDimensionRules.isBreachedIslandWorld(server)) {
+                return;
+            }
+            if (shouldThrottleBreachedMapRequest(player, server)) {
                 return;
             }
 
@@ -294,6 +330,22 @@ public class Breached implements ModInitializer {
                     deathMarkers
             ));
         });
+    }
+
+    private static boolean shouldThrottleBreachedMapRequest(ServerPlayerEntity player, MinecraftServer server) {
+        if (!player.isAlive()) {
+            return false;
+        }
+
+        UUID playerId = player.getUuid();
+        int currentTick = server.getTicks();
+        Integer lastRequestTick = BREACHED_MAP_LAST_REQUEST_TICKS.get(playerId);
+        if (lastRequestTick != null && currentTick - lastRequestTick < BREACHED_MAP_REQUEST_COOLDOWN_TICKS) {
+            return true;
+        }
+
+        BREACHED_MAP_LAST_REQUEST_TICKS.put(playerId, currentTick);
+        return false;
     }
 
     private static void registerRespawnBedSelectionNetworking() {
@@ -466,7 +518,10 @@ public class Breached implements ModInitializer {
 
     private static void registerLandlockProtectionEvents() {
         PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) -> {
-            if (world.isClient() || LandlockClaimManager.canPlayerModify(world, player, pos) || canBreachBlock(player.getMainHandStack(), state)) {
+            if (world.isClient()
+                    || LandlockClaimManager.canPlayerModify(world, player, pos)
+                    || LandlockClaimManager.isClaimDecayed(world, pos)
+                    || canBreachBlock(player.getMainHandStack(), state)) {
                 return true;
             }
 
@@ -518,7 +573,7 @@ public class Breached implements ModInitializer {
             ItemStack materialStack = player.getOffHandStack();
             java.util.Optional<ReinforcementTier> requestedTier = ReinforcementTier.fromMaterial(materialStack);
             if (requestedTier.isEmpty()) {
-                player.sendMessage(Text.literal("Hold 16 logs, 4 iron blocks, or 2 diamond blocks in your offhand."), false);
+                player.sendMessage(Text.literal("Hold 16 logs, 4 iron blocks, 2 diamond blocks, or 1 netherite ingot in your offhand."), false);
                 return ActionResult.SUCCESS;
             }
 
@@ -539,6 +594,7 @@ public class Breached implements ModInitializer {
                 materialStack.decrement(tier.materialCost());
             }
 
+            world.playSound(null, targetPos, SoundEvents.BLOCK_ANVIL_USE, SoundCategory.BLOCKS, 0.75F, 1.25F);
             player.sendMessage(Text.literal("Added " + tier.displayName() + " reinforcement."), false);
             return ActionResult.SUCCESS;
         });
@@ -578,7 +634,7 @@ public class Breached implements ModInitializer {
             }
 
             if (stack.getItem() instanceof BreacherItem) {
-                if (ReinforcementManager.hasEnoughDurability(stack, world, pos, state)) {
+                if (ReinforcementManager.hasEnoughDurability(stack, world, pos, state, serverPlayer)) {
                     return true;
                 }
 
@@ -624,6 +680,8 @@ public class Breached implements ModInitializer {
             UUID playerId = handler.player.getUuid();
             REINFORCEMENT_OUTLINE_TARGETS.remove(playerId);
             LANDLOCK_CLAIM_OUTLINE_TARGETS.remove(playerId);
+            REINFORCEMENT_OUTLINE_SYNC_SOURCES.remove(playerId);
+            LANDLOCK_CLAIM_OUTLINE_SYNC_SOURCES.remove(playerId);
         });
 
         ServerTickEvents.END_SERVER_TICK.register(server -> {
@@ -632,21 +690,27 @@ public class Breached implements ModInitializer {
             }
 
             for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-                syncReinforcementOutlineTargets(player);
-                syncLandlockClaimOutlineTargets(player);
+                syncReinforcementOutlineTargets(player, server.getTicks());
+                syncLandlockClaimOutlineTargets(player, server.getTicks());
             }
         });
     }
 
-    private static void syncReinforcementOutlineTargets(ServerPlayerEntity player) {
+    private static void syncReinforcementOutlineTargets(ServerPlayerEntity player, int currentTick) {
+        UUID playerId = player.getUuid();
         if (!ServerPlayNetworking.canSend(player, ReinforcementOutlinePayload.ID)) {
-            REINFORCEMENT_OUTLINE_TARGETS.remove(player.getUuid());
+            REINFORCEMENT_OUTLINE_TARGETS.remove(playerId);
+            REINFORCEMENT_OUTLINE_SYNC_SOURCES.remove(playerId);
             return;
         }
 
         ItemStack mainHandStack = player.getMainHandStack();
         if (!isReinforcementOutlineTool(mainHandStack)) {
+            REINFORCEMENT_OUTLINE_SYNC_SOURCES.remove(playerId);
             sendReinforcementOutlineTargets(player, ReinforcementOutlineTarget.empty());
+            return;
+        }
+        if (shouldSkipOutlineScan(REINFORCEMENT_OUTLINE_SYNC_SOURCES, player, OUTLINE_TOOL_MODE_REINFORCEMENT, currentTick)) {
             return;
         }
 
@@ -672,19 +736,27 @@ public class Breached implements ModInitializer {
         return stack.isOf(REINFORCER) || stack.getItem() instanceof BreacherItem;
     }
 
-    private static void syncLandlockClaimOutlineTargets(ServerPlayerEntity player) {
+    private static void syncLandlockClaimOutlineTargets(ServerPlayerEntity player, int currentTick) {
+        UUID playerId = player.getUuid();
         if (!ServerPlayNetworking.canSend(player, LandlockClaimOutlinePayload.ID)) {
-            LANDLOCK_CLAIM_OUTLINE_TARGETS.remove(player.getUuid());
+            LANDLOCK_CLAIM_OUTLINE_TARGETS.remove(playerId);
+            LANDLOCK_CLAIM_OUTLINE_SYNC_SOURCES.remove(playerId);
             return;
         }
 
         ItemStack mainHandStack = player.getMainHandStack();
         if (!isClaimOutlineProbe(mainHandStack)) {
+            LANDLOCK_CLAIM_OUTLINE_SYNC_SOURCES.remove(playerId);
             sendLandlockClaimOutlineTargets(player, LandlockClaimOutlineTarget.empty());
             return;
         }
 
         boolean includeUnauthorized = mainHandStack.isOf(DIAMOND_PROBE);
+        int toolMode = includeUnauthorized ? OUTLINE_TOOL_MODE_DIAMOND_PROBE : OUTLINE_TOOL_MODE_PROBE;
+        if (shouldSkipOutlineScan(LANDLOCK_CLAIM_OUTLINE_SYNC_SOURCES, player, toolMode, currentTick)) {
+            return;
+        }
+
         List<LandlockClaimOutlinePayload.Entry> entries = new ArrayList<>();
         LandlockClaimManager.forEachLoadedLandlockWithin(
                 player.getEntityWorld(),
@@ -693,7 +765,9 @@ public class Breached implements ModInitializer {
                 (landlockPos, landlock) -> {
                     boolean authorized = landlock.isAuthorized(player.getUuid());
                     if (authorized || includeUnauthorized) {
-                        entries.add(new LandlockClaimOutlinePayload.Entry(landlock.getClaimCenter().toImmutable(), authorized));
+                        boolean decayed = landlock.isDecayed();
+                        boolean lockdown = !authorized && LandlockClaimManager.isLockdownActive(player.getEntityWorld(), landlock);
+                        entries.add(new LandlockClaimOutlinePayload.Entry(landlock.getClaimCenter().toImmutable(), authorized, lockdown, decayed));
                     }
                 }
         );
@@ -711,6 +785,26 @@ public class Breached implements ModInitializer {
 
     private static boolean isClaimOutlineProbe(ItemStack stack) {
         return stack.isOf(PROBE) || stack.isOf(DIAMOND_PROBE);
+    }
+
+    private static boolean shouldSkipOutlineScan(
+            Map<UUID, OutlineSyncSource> syncSources,
+            ServerPlayerEntity player,
+            int toolMode,
+            int currentTick
+    ) {
+        UUID playerId = player.getUuid();
+        BlockPos blockPos = player.getBlockPos().toImmutable();
+        OutlineSyncSource previous = syncSources.get(playerId);
+        if (previous != null
+                && previous.toolMode() == toolMode
+                && previous.blockPos().equals(blockPos)
+                && currentTick - previous.lastScanTick() < OUTLINE_STATIONARY_REFRESH_INTERVAL_TICKS) {
+            return true;
+        }
+
+        syncSources.put(playerId, new OutlineSyncSource(blockPos, toolMode, currentTick));
+        return false;
     }
 
     private static void sendReinforcementOutlineTargets(ServerPlayerEntity player, ReinforcementOutlineTarget target) {
@@ -938,6 +1032,9 @@ public class Breached implements ModInitializer {
     }
 
     private record DeathMapMarker(String label, int x, int z, long expiresAtWorldTime) {
+    }
+
+    private record OutlineSyncSource(BlockPos blockPos, int toolMode, int lastScanTick) {
     }
 
     private record ReinforcementOutlineTarget(List<ReinforcementOutlinePayload.Entry> entries) {

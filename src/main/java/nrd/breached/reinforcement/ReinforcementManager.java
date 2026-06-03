@@ -16,6 +16,7 @@ import java.util.Optional;
 
 public final class ReinforcementManager {
     private static final int NORMAL_BREACHER_DURABILITY_COST = 4;
+    private static final int LOCKDOWN_DURABILITY_MULTIPLIER = 2;
 
     private ReinforcementManager() {
     }
@@ -45,10 +46,12 @@ public final class ReinforcementManager {
 
     public static void setTier(ServerWorld world, BlockPos pos, ReinforcementTier tier) {
         ReinforcementState.get(world.getServer()).setTier(world.getRegistryKey(), pos, tier);
+        LandlockClaimManager.refreshClaimCost(world, pos);
     }
 
     public static void removeStoredTier(ServerWorld world, BlockPos pos) {
         ReinforcementState.get(world.getServer()).remove(world.getRegistryKey(), pos);
+        LandlockClaimManager.refreshClaimCost(world, pos);
     }
 
     public static boolean canStoreReinforcement(BlockState state) {
@@ -61,12 +64,39 @@ public final class ReinforcementManager {
                 .orElse(NORMAL_BREACHER_DURABILITY_COST);
     }
 
+    public static int getBreacherDurabilityCost(World world, BlockPos pos, BlockState state, ServerPlayerEntity player) {
+        int baseCost = getBreacherDurabilityCost(world, pos, state);
+        Optional<LandlockClaimManager.ClaimAccess> claimAccess = LandlockClaimManager.getClaimAccess(world, pos, player.getUuid());
+        if (claimAccess.isEmpty()) {
+            return baseCost;
+        }
+
+        LandlockClaimManager.ClaimAccess access = claimAccess.get();
+        if (access.decayed()) {
+            return getStoredTier(world, pos).isPresent() ? Math.max(1, baseCost / 2) : baseCost;
+        }
+
+        if (!access.authorized() && access.lockdown()) {
+            return baseCost * LOCKDOWN_DURABILITY_MULTIPLIER;
+        }
+
+        return baseCost;
+    }
+
     public static boolean hasEnoughDurability(ItemStack stack, World world, BlockPos pos, BlockState state) {
         if (!stack.isDamageable()) {
             return true;
         }
 
         return getRemainingDurability(stack) >= getBreacherDurabilityCost(world, pos, state);
+    }
+
+    public static boolean hasEnoughDurability(ItemStack stack, World world, BlockPos pos, BlockState state, ServerPlayerEntity player) {
+        if (!stack.isDamageable()) {
+            return true;
+        }
+
+        return getRemainingDurability(stack) >= getBreacherDurabilityCost(world, pos, state, player);
     }
 
     public static void breakBreacher(ItemStack stack, ServerWorld world, ServerPlayerEntity player) {

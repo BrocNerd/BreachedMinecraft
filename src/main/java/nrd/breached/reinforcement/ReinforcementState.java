@@ -36,6 +36,7 @@ public class ReinforcementState extends PersistentState {
     );
 
     private final Map<ReinforcedBlockKey, ReinforcementTier> reinforcements = new HashMap<>();
+    private final Map<ReinforcedChunkKey, Map<BlockPos, ReinforcementTier>> reinforcementsByChunk = new HashMap<>();
 
     public static ReinforcementState get(MinecraftServer server) {
         return server.getOverworld().getPersistentStateManager().getOrCreate(TYPE);
@@ -47,10 +48,23 @@ public class ReinforcementState extends PersistentState {
 
     public Map<BlockPos, ReinforcementTier> getTiersWithin(RegistryKey<World> dimension, BlockPos center, int radius) {
         Map<BlockPos, ReinforcementTier> nearbyReinforcements = new HashMap<>();
-        for (Map.Entry<ReinforcedBlockKey, ReinforcementTier> entry : reinforcements.entrySet()) {
-            ReinforcedBlockKey key = entry.getKey();
-            if (key.dimension().equals(dimension) && isWithinRadius(key.pos(), center, radius)) {
-                nearbyReinforcements.put(key.pos(), entry.getValue());
+        int minChunkX = Math.floorDiv(center.getX() - radius, 16);
+        int maxChunkX = Math.floorDiv(center.getX() + radius, 16);
+        int minChunkZ = Math.floorDiv(center.getZ() - radius, 16);
+        int maxChunkZ = Math.floorDiv(center.getZ() + radius, 16);
+
+        for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+            for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+                Map<BlockPos, ReinforcementTier> chunkReinforcements = reinforcementsByChunk.get(new ReinforcedChunkKey(dimension, chunkX, chunkZ));
+                if (chunkReinforcements == null) {
+                    continue;
+                }
+
+                for (Map.Entry<BlockPos, ReinforcementTier> entry : chunkReinforcements.entrySet()) {
+                    if (isWithinRadius(entry.getKey(), center, radius)) {
+                        nearbyReinforcements.put(entry.getKey(), entry.getValue());
+                    }
+                }
             }
         }
 
@@ -58,14 +72,45 @@ public class ReinforcementState extends PersistentState {
     }
 
     public void setTier(RegistryKey<World> dimension, BlockPos pos, ReinforcementTier tier) {
-        reinforcements.put(new ReinforcedBlockKey(dimension, pos.toImmutable()), tier);
+        putReinforcement(dimension, pos, tier);
         markDirty();
     }
 
     public void remove(RegistryKey<World> dimension, BlockPos pos) {
-        if (reinforcements.remove(new ReinforcedBlockKey(dimension, pos.toImmutable())) != null) {
+        BlockPos immutablePos = pos.toImmutable();
+        if (reinforcements.remove(new ReinforcedBlockKey(dimension, immutablePos)) != null) {
+            removeFromChunkIndex(dimension, immutablePos);
             markDirty();
         }
+    }
+
+    private void putReinforcement(RegistryKey<World> dimension, BlockPos pos, ReinforcementTier tier) {
+        BlockPos immutablePos = pos.toImmutable();
+        reinforcements.put(new ReinforcedBlockKey(dimension, immutablePos), tier);
+        reinforcementsByChunk
+                .computeIfAbsent(getChunkKey(dimension, immutablePos), key -> new HashMap<>())
+                .put(immutablePos, tier);
+    }
+
+    private void removeFromChunkIndex(RegistryKey<World> dimension, BlockPos pos) {
+        ReinforcedChunkKey chunkKey = getChunkKey(dimension, pos);
+        Map<BlockPos, ReinforcementTier> chunkReinforcements = reinforcementsByChunk.get(chunkKey);
+        if (chunkReinforcements == null) {
+            return;
+        }
+
+        chunkReinforcements.remove(pos);
+        if (chunkReinforcements.isEmpty()) {
+            reinforcementsByChunk.remove(chunkKey);
+        }
+    }
+
+    private static ReinforcedChunkKey getChunkKey(RegistryKey<World> dimension, BlockPos pos) {
+        return new ReinforcedChunkKey(
+                dimension,
+                Math.floorDiv(pos.getX(), 16),
+                Math.floorDiv(pos.getZ(), 16)
+        );
     }
 
     private NbtCompound toNbt() {
@@ -114,7 +159,7 @@ public class ReinforcementState extends PersistentState {
                     reinforcementNbt.getInt(Y_KEY, 0),
                     reinforcementNbt.getInt(Z_KEY, 0)
             );
-            state.reinforcements.put(new ReinforcedBlockKey(dimension, pos), tier.get());
+            state.putReinforcement(dimension, pos, tier.get());
         }
 
         return state;
@@ -131,5 +176,8 @@ public class ReinforcementState extends PersistentState {
     }
 
     private record ReinforcedBlockKey(RegistryKey<World> dimension, BlockPos pos) {
+    }
+
+    private record ReinforcedChunkKey(RegistryKey<World> dimension, int chunkX, int chunkZ) {
     }
 }

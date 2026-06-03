@@ -1,6 +1,6 @@
 {
   "parent": "minecraft:item/handheld",
   "textures": {
-    "layer0": "breached:item/probe"
+    "layer0": "breached:item/diamond_probe"
   }
 }

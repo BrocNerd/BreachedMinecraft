@@ -358,30 +358,33 @@ public final class BreachedStructurePlacementManager {
             UUID playerId = player.getUuid();
             activePlayerIds.add(playerId);
 
-            Optional<MajorStructureZone> currentZone = getCurrentMajorStructureZone(world, state, player.getBlockPos());
+            Optional<Map.Entry<String, Text>> currentZone = getCurrentMajorStructureZone(world, state, player.getBlockPos());
             if (currentZone.isEmpty()) {
                 PLAYER_MAJOR_ZONE_KEYS.remove(playerId);
                 continue;
             }
 
             String previousZoneKey = PLAYER_MAJOR_ZONE_KEYS.get(playerId);
-            if (currentZone.get().placementKey().equals(previousZoneKey)) {
+            if (currentZone.get().getKey().equals(previousZoneKey)) {
                 continue;
             }
 
-            PLAYER_MAJOR_ZONE_KEYS.put(playerId, currentZone.get().placementKey());
-            player.sendMessage(currentZone.get().entryMessage(), true);
+            PLAYER_MAJOR_ZONE_KEYS.put(playerId, currentZone.get().getKey());
+            player.sendMessage(currentZone.get().getValue(), true);
         }
 
         PLAYER_MAJOR_ZONE_KEYS.keySet().removeIf(playerId -> !activePlayerIds.contains(playerId));
     }
 
-    private static Optional<MajorStructureZone> getCurrentMajorStructureZone(
+    private static Optional<Map.Entry<String, Text>> getCurrentMajorStructureZone(
             ServerWorld world,
             BreachedStructurePlacementState state,
             BlockPos pos
     ) {
-        MajorStructureZone bestZone = null;
+        String bestPlacementKey = null;
+        Text bestEntryMessage = null;
+        int bestPriority = Integer.MIN_VALUE;
+        long bestDistanceSquared = Long.MAX_VALUE;
         for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> entry : state.placements()) {
             BreachedStructurePlacementState.SavedPlacement placement = entry.getValue();
             if (!placement.active()) {
@@ -399,18 +402,20 @@ public final class BreachedStructurePlacementManager {
                 continue;
             }
 
-            MajorStructureZone zone = new MajorStructureZone(
-                    entry.getKey(),
-                    getMajorZoneEntryMessage(definition.get()),
-                    definition.get().priority(),
-                    distanceSquared
-            );
-            if (bestZone == null || isBetterMajorStructureZone(zone, bestZone)) {
-                bestZone = zone;
+            int priority = definition.get().priority();
+            if (bestPlacementKey == null
+                    || isBetterMajorStructureZone(priority, distanceSquared, bestPriority, bestDistanceSquared)) {
+                bestPlacementKey = entry.getKey();
+                bestEntryMessage = getMajorZoneEntryMessage(definition.get());
+                bestPriority = priority;
+                bestDistanceSquared = distanceSquared;
             }
         }
 
-        return Optional.ofNullable(bestZone);
+        if (bestPlacementKey == null) {
+            return Optional.empty();
+        }
+        return Optional.of(Map.entry(bestPlacementKey, bestEntryMessage));
     }
 
     private static long getMajorStructureZoneDistanceSquared(
@@ -434,12 +439,17 @@ public final class BreachedStructurePlacementManager {
         return -1L;
     }
 
-    private static boolean isBetterMajorStructureZone(MajorStructureZone candidate, MajorStructureZone current) {
-        if (candidate.priority() != current.priority()) {
-            return candidate.priority() > current.priority();
+    private static boolean isBetterMajorStructureZone(
+            int candidatePriority,
+            long candidateDistanceSquared,
+            int currentPriority,
+            long currentDistanceSquared
+    ) {
+        if (candidatePriority != currentPriority) {
+            return candidatePriority > currentPriority;
         }
 
-        return candidate.distanceSquared() < current.distanceSquared();
+        return candidateDistanceSquared < currentDistanceSquared;
     }
 
     private static Text getMajorZoneEntryMessage(BreachedStructureDefinition definition) {
@@ -5181,9 +5191,6 @@ public final class BreachedStructurePlacementManager {
         private static long toMillis(long nanos) {
             return Math.max(0L, nanos / 1_000_000L);
         }
-    }
-
-    private record MajorStructureZone(String placementKey, Text entryMessage, int priority, long distanceSquared) {
     }
 
     public record BreachedMapMarker(String label, int x, int z, int color) {

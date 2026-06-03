@@ -19,5 +19,7 @@
   "key.breached.open_map": "Open Breached Map",
   "key.breached.open_archive": "Open Breached Archive",
   "generator.breached.breached_island": "Breached Island",
-  "generator.breached.large_breached_island": "Large Breached Island"
+  "generator.breached.large_breached_island": "Large Breached Island",
+  "subtitles.breached.breach_alarm": "Breacher alarm rings",
+  "subtitles.breached.reinforced_breach_alarm": "Reinforced block breached"
 }

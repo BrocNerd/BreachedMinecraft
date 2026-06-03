@@ -7,6 +7,7 @@ import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
 import nrd.breached.block.LandlockBlockEntity;
 
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.BiConsumer;
 
@@ -14,6 +15,7 @@ public final class LandlockClaimManager {
     public static final int CLAIM_SIZE = 17;
     private static final int CLAIM_NEGATIVE_RANGE = CLAIM_SIZE / 2;
     private static final int CLAIM_POSITIVE_RANGE = CLAIM_SIZE - CLAIM_NEGATIVE_RANGE - 1;
+    private static final int CLAIMING_LANDLOCK_SEARCH_RADIUS = CLAIM_NEGATIVE_RANGE + CLAIM_POSITIVE_RANGE;
     public static final int MIN_LANDLOCK_CENTER_SPACING = 32;
     public static final int MAX_AUTHORIZED_LANDLOCKS = 3;
     public static final int MIN_LANDLOCK_PLACEMENT_Y = 60;
@@ -33,6 +35,51 @@ public final class LandlockClaimManager {
         }
 
         return landlock.isAuthorized(player.getUuid());
+    }
+
+    public static Optional<ClaimAccess> getClaimAccess(World world, BlockPos targetPos, UUID playerUuid) {
+        LandlockBlockEntity landlock = findClaimingLandlock(world, targetPos);
+        if (landlock == null) {
+            return Optional.empty();
+        }
+
+        boolean decayed = landlock.isDecayed();
+        return Optional.of(new ClaimAccess(
+                landlock.getClaimCenter(),
+                landlock.isAuthorized(playerUuid),
+                !decayed && isLockdownActive(world, landlock),
+                decayed
+        ));
+    }
+
+    public static boolean isLockdownActive(World world, LandlockBlockEntity landlock) {
+        if (landlock.isDecayed()) {
+            return false;
+        }
+
+        if (!(world instanceof ServerWorld serverWorld)) {
+            return false;
+        }
+
+        for (var player : serverWorld.getServer().getPlayerManager().getPlayerList()) {
+            if (landlock.isAuthorized(player.getUuid())) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public static boolean isClaimDecayed(World world, BlockPos targetPos) {
+        LandlockBlockEntity landlock = findClaimingLandlock(world, targetPos);
+        return landlock != null && landlock.isDecayed();
+    }
+
+    public static void refreshClaimCost(World world, BlockPos targetPos) {
+        LandlockBlockEntity landlock = findClaimingLandlock(world, targetPos);
+        if (landlock != null) {
+            landlock.refreshClaimCost();
+        }
     }
 
     public static int countPlayerLandlockAuthorizations(World world, UUID playerUuid) {
@@ -95,9 +142,29 @@ public final class LandlockClaimManager {
             return null;
         }
 
-        ClaimingLandlockFinder finder = new ClaimingLandlockFinder(pos);
-        visitLoadedLandlocks(serverWorld, finder::find);
-        return finder.landlock;
+        int minChunkX = (pos.getX() - CLAIMING_LANDLOCK_SEARCH_RADIUS) >> 4;
+        int maxChunkX = (pos.getX() + CLAIMING_LANDLOCK_SEARCH_RADIUS) >> 4;
+        int minChunkZ = (pos.getZ() - CLAIMING_LANDLOCK_SEARCH_RADIUS) >> 4;
+        int maxChunkZ = (pos.getZ() + CLAIMING_LANDLOCK_SEARCH_RADIUS) >> 4;
+
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                WorldChunk chunk = serverWorld.getChunkManager().getWorldChunk(chunkX, chunkZ);
+                if (chunk == null) {
+                    continue;
+                }
+
+                for (var blockEntity : chunk.getBlockEntities().values()) {
+                    if (blockEntity instanceof LandlockBlockEntity landlock
+                            && isPotentialClaimingLandlock(landlock.getPos(), pos)
+                            && isInsideClaim(landlock.getClaimCenter(), pos)) {
+                        return landlock;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     public static boolean isInsideClaim(BlockPos landlockPos, BlockPos pos) {
@@ -119,6 +186,12 @@ public final class LandlockClaimManager {
     private static boolean isTooCloseToLandlock(BlockPos existingLandlockPos, BlockPos newLandlockPos) {
         return Math.abs(existingLandlockPos.getX() - newLandlockPos.getX()) <= MIN_LANDLOCK_CENTER_SPACING
                 && Math.abs(existingLandlockPos.getZ() - newLandlockPos.getZ()) <= MIN_LANDLOCK_CENTER_SPACING;
+    }
+
+    private static boolean isPotentialClaimingLandlock(BlockPos landlockPos, BlockPos targetPos) {
+        return Math.abs(landlockPos.getX() - targetPos.getX()) <= CLAIMING_LANDLOCK_SEARCH_RADIUS
+                && Math.abs(landlockPos.getY() - targetPos.getY()) <= CLAIMING_LANDLOCK_SEARCH_RADIUS
+                && Math.abs(landlockPos.getZ() - targetPos.getZ()) <= CLAIMING_LANDLOCK_SEARCH_RADIUS;
     }
 
     private static boolean isWithinRadius(BlockPos pos, BlockPos center, int radius) {
@@ -153,21 +226,9 @@ public final class LandlockClaimManager {
         boolean visit(BlockPos landlockPos, LandlockBlockEntity landlock);
     }
 
-    private static final class ClaimingLandlockFinder {
-        private final BlockPos pos;
-        private LandlockBlockEntity landlock;
-
-        private ClaimingLandlockFinder(BlockPos pos) {
-            this.pos = pos;
-        }
-
-        private boolean find(BlockPos landlockPos, LandlockBlockEntity landlock) {
-            if (!isInsideClaim(landlock.getClaimCenter(), pos)) {
-                return false;
-            }
-
-            this.landlock = landlock;
-            return true;
+    public record ClaimAccess(BlockPos claimCenter, boolean authorized, boolean lockdown, boolean decayed) {
+        public ClaimAccess {
+            claimCenter = claimCenter.toImmutable();
         }
     }
 

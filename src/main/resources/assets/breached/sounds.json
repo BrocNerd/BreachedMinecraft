@@ -1,0 +1,30 @@
+{
+  "breach_alarm": {
+    "subtitle": "subtitles.breached.breach_alarm",
+    "sounds": [
+      {
+        "name": "minecraft:block/bell/bell_use01",
+        "volume": 2.4,
+        "pitch": 0.72,
+        "attenuation_distance": 320
+      },
+      {
+        "name": "minecraft:block/bell/bell_use02",
+        "volume": 2.2,
+        "pitch": 0.8,
+        "attenuation_distance": 320
+      }
+    ]
+  },
+  "reinforced_breach_alarm": {
+    "subtitle": "subtitles.breached.reinforced_breach_alarm",
+    "sounds": [
+      {
+        "name": "minecraft:random/anvil_land",
+        "volume": 3.2,
+        "pitch": 0.55,
+        "attenuation_distance": 384
+      }
+    ]
+  }
+}

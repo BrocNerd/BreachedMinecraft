@@ -1,0 +1,16 @@
+package nrd.breached.mixin.client;
+
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.gen.Accessor;
+import org.spongepowered.asm.mixin.gen.Invoker;
+
+@Mixin(KeyBinding.class)
+public interface KeyBindingAccessor {
+    @Accessor("boundKey")
+    InputUtil.Key breached$getBoundKey();
+
+    @Invoker("shouldSetOnGameFocus")
+    boolean breached$shouldSetOnGameFocus();
+}

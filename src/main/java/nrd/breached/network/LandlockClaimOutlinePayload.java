@@ -35,6 +35,8 @@ public record LandlockClaimOutlinePayload(List<Entry> entries) implements Custom
         for (Entry entry : payload.entries()) {
             buf.writeBlockPos(entry.claimCenter());
             buf.writeBoolean(entry.authorized());
+            buf.writeBoolean(entry.lockdown());
+            buf.writeBoolean(entry.decayed());
         }
     }
 
@@ -42,12 +44,12 @@ public record LandlockClaimOutlinePayload(List<Entry> entries) implements Custom
         int entryCount = buf.readVarInt();
         List<Entry> entries = new ArrayList<>(entryCount);
         for (int index = 0; index < entryCount; index++) {
-            entries.add(new Entry(buf.readBlockPos(), buf.readBoolean()));
+            entries.add(new Entry(buf.readBlockPos(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean()));
         }
 
         return new LandlockClaimOutlinePayload(entries);
     }
 
-    public record Entry(BlockPos claimCenter, boolean authorized) {
+    public record Entry(BlockPos claimCenter, boolean authorized, boolean lockdown, boolean decayed) {
     }
 }

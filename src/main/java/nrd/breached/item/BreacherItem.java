@@ -12,6 +12,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
+import nrd.breached.breach.BreachNotificationManager;
 import nrd.breached.reinforcement.ReinforcementManager;
 
 public class BreacherItem extends Item {
@@ -54,8 +55,9 @@ public class BreacherItem extends Item {
     @Override
     public boolean postMine(ItemStack stack, World world, BlockState state, BlockPos pos, LivingEntity miner) {
         if (world instanceof ServerWorld serverWorld && miner instanceof ServerPlayerEntity player && !isBlockedBlock(state)) {
+            BreachNotificationManager.tryPlayBreachAlarm(serverWorld, pos, state, player);
             stack.damage(
-                    ReinforcementManager.getBreacherDurabilityCost(world, pos, state),
+                    ReinforcementManager.getBreacherDurabilityCost(world, pos, state, player),
                     serverWorld,
                     player,
                     item -> player.sendEquipmentBreakStatus(item, EquipmentSlot.MAINHAND)
