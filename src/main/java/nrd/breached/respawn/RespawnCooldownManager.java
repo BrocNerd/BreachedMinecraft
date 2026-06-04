@@ -150,7 +150,12 @@ public final class RespawnCooldownManager {
             return Optional.empty();
         }
 
+        boolean alreadySaved = hasSavedBedRespawnPoint(player.getUuid(), respawn.respawnData());
         boolean removedOldBed = addBedRespawnPoint(player.getUuid(), respawn.respawnData());
+        if (alreadySaved) {
+            return Optional.empty();
+        }
+
         return Optional.of(createBedRespawnSelectionMessage(removedOldBed));
     }
 
@@ -271,6 +276,12 @@ public final class RespawnCooldownManager {
         points.add(0, point);
         setBedRespawnPoints(playerUuid, points);
         return removesOldBed;
+    }
+
+    private static boolean hasSavedBedRespawnPoint(UUID playerUuid, WorldProperties.SpawnPoint point) {
+        return BED_RESPAWN_POINTS.getOrDefault(playerUuid, List.of())
+                .stream()
+                .anyMatch(existingPoint -> isSameBed(existingPoint, point));
     }
 
     private static Text createBedRespawnSelectionMessage(boolean removedOldBed) {

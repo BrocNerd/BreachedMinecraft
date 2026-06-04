@@ -25,6 +25,7 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.passive.WanderingTraderEntity;
 import net.minecraft.item.BlockItem;
+import net.minecraft.item.BucketItem;
 import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -69,6 +70,7 @@ import nrd.breached.network.ReinforcementOutlinePayload;
 import nrd.breached.network.RequestBreachedMapPayload;
 import nrd.breached.network.RequestTownhallRespawnPayload;
 import nrd.breached.network.SelectRespawnBedPayload;
+import nrd.breached.respawn.BedRestManager;
 import nrd.breached.respawn.InitialTownhallSpawnManager;
 import nrd.breached.reinforcement.ReinforcementManager;
 import nrd.breached.reinforcement.ReinforcementTier;
@@ -156,7 +158,7 @@ public class Breached implements ModInitializer {
     public static final Item IRON_BREACHER = registerItem(
             "iron_breacher",
             settings -> new BreacherItem(settings, BreacherItem.IRON_BLOCK_BREAKING_DELTA, ToolMaterial.IRON),
-            new Item.Settings().maxDamage(32)
+            new Item.Settings().maxDamage(64)
     );
 
     public static final Item DIAMOND_BREACHER = registerItem(
@@ -277,6 +279,7 @@ public class Breached implements ModInitializer {
 
     private static void registerRespawnEvents() {
         EntitySleepEvents.ALLOW_RESETTING_TIME.register(player -> false);
+        BedRestManager.register();
         ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> RespawnCooldownManager.applyPendingBedRespawnCooldown(newPlayer));
     }
 
@@ -870,21 +873,25 @@ public class Breached implements ModInitializer {
             if (player.getStackInHand(hand).isOf(LANDLOCK_BLOCK.asItem())) {
                 if (placementContext.getBlockPos().getY() < LandlockClaimManager.MIN_LANDLOCK_PLACEMENT_Y) {
                     player.sendMessage(Text.literal("Landlock Blocks cannot be placed below Y " + LandlockClaimManager.MIN_LANDLOCK_PLACEMENT_Y + "."), false);
+                    syncRejectedBlockPlacement(player);
                     return ActionResult.FAIL;
                 }
 
                 if (LandlockClaimManager.countPlayerLandlockAuthorizations(world, player.getUuid()) >= LandlockClaimManager.MAX_AUTHORIZED_LANDLOCKS) {
                     player.sendMessage(Text.literal("You are already authorized on the maximum number of Landlocks."), false);
+                    syncRejectedBlockPlacement(player);
                     return ActionResult.FAIL;
                 }
 
                 if (BreachedStructurePlacementManager.isInsideMajorStructureLandlockExclusion(world, placementContext.getBlockPos())) {
                     player.sendMessage(Text.literal("Landlock Blocks cannot be placed within 12 blocks of a protected major structure."), false);
+                    syncRejectedBlockPlacement(player);
                     return ActionResult.FAIL;
                 }
 
                 if (LandlockClaimManager.isTooCloseToExistingLandlock(world, placementContext.getBlockPos())) {
                     player.sendMessage(Text.literal("This Landlock is too close to another Landlock."), false);
+                    syncRejectedBlockPlacement(player);
                     return ActionResult.FAIL;
                 }
             }
@@ -894,8 +901,16 @@ public class Breached implements ModInitializer {
             }
 
             player.sendMessage(Text.literal("This area is protected by a Landlock."), false);
+            syncRejectedBlockPlacement(player);
             return ActionResult.FAIL;
         });
+    }
+
+    private static void syncRejectedBlockPlacement(PlayerEntity player) {
+        if (player instanceof ServerPlayerEntity serverPlayer) {
+            serverPlayer.getInventory().markDirty();
+            serverPlayer.currentScreenHandler.syncState();
+        }
     }
 
     private static void registerLandlockDoorProtectionEvents() {
@@ -909,9 +924,29 @@ public class Breached implements ModInitializer {
                 return ActionResult.PASS;
             }
 
+            ActionResult itemUseResult = tryUseHeldItemInsteadOfProtectedBlock(player, world, hand);
+            if (itemUseResult.isAccepted()) {
+                return itemUseResult;
+            }
+
             player.sendMessage(Text.literal("This door is protected by a Landlock."), false);
             return ActionResult.FAIL;
         });
+    }
+
+    private static ActionResult tryUseHeldItemInsteadOfProtectedBlock(PlayerEntity player, World world, Hand hand) {
+        if (!(player instanceof ServerPlayerEntity serverPlayer)) {
+            return ActionResult.PASS;
+        }
+
+        ItemStack stack = player.getStackInHand(hand);
+        if (stack.isEmpty()
+                || stack.getItem() instanceof BlockItem
+                || stack.getItem() instanceof BucketItem) {
+            return ActionResult.PASS;
+        }
+
+        return serverPlayer.interactionManager.interactItem(serverPlayer, world, stack, hand);
     }
 
     private static boolean isDoorLikeBlock(Block block) {

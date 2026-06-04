@@ -17,6 +17,7 @@
     "PlayerManagerMixin",
     "PlayerInventoryMixin",
     "ServerPlayerRespawnMixin",
+    "ServerWorldSleepStatusMixin",
     "ServerWaypointHandlerMixin"
   ],
   "injectors": {

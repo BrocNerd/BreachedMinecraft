@@ -9,7 +9,8 @@
     "InGameHudMixin",
     "InventoryScreenMixin",
     "KeyBindingAccessor",
-    "ScreenAccessor"
+    "ScreenAccessor",
+    "SleepingChatScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1

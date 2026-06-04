@@ -9,6 +9,8 @@ import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
+import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
+import net.fabricmc.fabric.api.resource.SimpleSynchronousResourceReloadListener;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.MinecraftClient;
@@ -27,6 +29,8 @@ import net.minecraft.client.render.VertexRendering;
 import net.minecraft.client.render.state.OutlineRenderState;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.item.ItemStack;
+import net.minecraft.resource.ResourceManager;
+import net.minecraft.resource.ResourceType;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ColorHelper;
@@ -49,6 +53,7 @@ import nrd.breached.reinforcement.ReinforcementTier;
 import nrd.breached.reinforcement.ReinforcementVisibilityCache;
 import org.lwjgl.glfw.GLFW;
 
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -73,6 +78,7 @@ public class BreachedClient implements ClientModInitializer {
     );
     private static final KeyBinding.Category BREACHED_KEY_CATEGORY = KeyBinding.Category.create(Identifier.of(Breached.MOD_ID, "breached"));
     private static final long BREACHED_MAP_REQUEST_COOLDOWN_MILLIS = 2_000L;
+    private static final String IRIS_API_CLASS_NAME = "net.irisshaders.iris.api.v0.IrisApi";
     private static Screen pendingBreachedMapParentScreen;
     private static boolean pendingBreachedMapRespawnOnBedSelect;
     private static OpenBreachedMapPayload cachedBreachedMapPayload;
@@ -80,6 +86,12 @@ public class BreachedClient implements ClientModInitializer {
     private static long lastBreachedMapServerRequestMillis;
     private static boolean suppressMapKeyOpenUntilReleased;
     private static boolean suppressArchiveKeyOpenUntilReleased;
+    private static int reinforcementOutlineSuppressionTicks;
+    private static boolean wasInShaderConfigurationScreen;
+    private static boolean shaderStateDetectionUnavailable;
+    private static Object irisApiInstance;
+    private static Method irisShaderPackInUseMethod;
+    private static Boolean lastIrisShaderPackInUse;
     private static KeyBinding openBreachedMapKeyBinding;
     private static KeyBinding openBreachedArchiveKeyBinding;
 
@@ -93,6 +105,7 @@ public class BreachedClient implements ClientModInitializer {
         registerReinforcementOutlineReceiver();
         registerLandlockClaimOutlineReceiver();
         registerReinforcementOutlineRenderer();
+        registerReinforcementOutlineTransitionGuards();
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> clearClientSessionCache());
     }
 
@@ -317,7 +330,7 @@ public class BreachedClient implements ClientModInitializer {
             return true;
         });
 
-        WorldRenderEvents.BEFORE_DEBUG_RENDER.register(context -> {
+        WorldRenderEvents.END_MAIN.register(context -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.world == null) {
                 return;
@@ -330,6 +343,10 @@ public class BreachedClient implements ClientModInitializer {
                 return;
             }
 
+            if (renderReinforcements) {
+                updateReinforcementOutlineSuppressionFromShaderState();
+            }
+
             var consumers = context.consumers();
             if (consumers == null) {
                 return;
@@ -337,20 +354,113 @@ public class BreachedClient implements ClientModInitializer {
 
             Vec3d cameraPos = context.worldState().cameraRenderState.pos;
 
-            if (renderReinforcements) {
-                VertexConsumer reinforcementConsumer = consumers.getBuffer(RenderLayers.lines());
+            if (renderReinforcements && canRenderReinforcementOutlines(client)) {
+                VertexConsumer reinforcementConsumer = consumers.getBuffer(RenderLayers.linesTranslucent());
                 for (ReinforcementOutlineTarget target : outlineTargets) {
                     renderReinforcementOutline(context.matrices(), reinforcementConsumer, cameraPos, client.world, target);
                 }
             }
 
             if (renderClaims) {
-                VertexConsumer hiddenClaimConsumer = consumers.getBuffer(LANDLOCK_CLAIM_OUTLINE_LAYER);
+                VertexConsumer shaderVisibleClaimConsumer = consumers.getBuffer(RenderLayers.linesTranslucent());
+                VertexConsumer seeThroughClaimConsumer = consumers.getBuffer(LANDLOCK_CLAIM_OUTLINE_LAYER);
                 for (LandlockClaimOutlineTarget target : claimOutlineTargets) {
-                    renderLandlockClaimOutline(context.matrices(), hiddenClaimConsumer, cameraPos, target, 0.8F, 1.75F);
+                    renderLandlockClaimOutline(context.matrices(), shaderVisibleClaimConsumer, cameraPos, target, 0.95F, 2.0F);
+                    renderLandlockClaimOutline(context.matrices(), seeThroughClaimConsumer, cameraPos, target, 0.8F, 1.75F);
                 }
             }
         });
+    }
+
+    private static void registerReinforcementOutlineTransitionGuards() {
+        ResourceManagerHelper.get(ResourceType.CLIENT_RESOURCES).registerReloadListener(new SimpleSynchronousResourceReloadListener() {
+            @Override
+            public Identifier getFabricId() {
+                return Identifier.of(Breached.MOD_ID, "reinforcement_outline_reload_guard");
+            }
+
+            @Override
+            public void reload(ResourceManager manager) {
+                suppressReinforcementOutlinesTemporarily();
+            }
+        });
+
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (reinforcementOutlineSuppressionTicks > 0) {
+                reinforcementOutlineSuppressionTicks--;
+            }
+
+            boolean inShaderConfigurationScreen = isShaderConfigurationScreen(client.currentScreen);
+            if (wasInShaderConfigurationScreen && !inShaderConfigurationScreen) {
+                suppressReinforcementOutlinesTemporarily();
+            }
+
+            wasInShaderConfigurationScreen = inShaderConfigurationScreen;
+        });
+    }
+
+    private static boolean shouldSuppressReinforcementOutlines() {
+        return reinforcementOutlineSuppressionTicks > 0;
+    }
+
+    private static boolean canRenderReinforcementOutlines(MinecraftClient client) {
+        return client.currentScreen == null && !shouldSuppressReinforcementOutlines();
+    }
+
+    private static void suppressReinforcementOutlinesTemporarily() {
+        reinforcementOutlineSuppressionTicks = Math.max(reinforcementOutlineSuppressionTicks, 20 * 2);
+    }
+
+    private static boolean isShaderConfigurationScreen(Screen screen) {
+        if (screen == null) {
+            return false;
+        }
+
+        String className = screen.getClass().getName().toLowerCase(java.util.Locale.ROOT);
+        return className.contains("shader") || className.contains("iris");
+    }
+
+    private static void updateReinforcementOutlineSuppressionFromShaderState() {
+        Optional<Boolean> shaderPackInUse = getIrisShaderPackInUse();
+        if (shaderPackInUse.isEmpty()) {
+            return;
+        }
+
+        boolean currentShaderPackInUse = shaderPackInUse.get();
+        if (lastIrisShaderPackInUse != null && lastIrisShaderPackInUse != currentShaderPackInUse) {
+            suppressReinforcementOutlinesTemporarily();
+        }
+
+        lastIrisShaderPackInUse = currentShaderPackInUse;
+    }
+
+    private static Optional<Boolean> getIrisShaderPackInUse() {
+        if (shaderStateDetectionUnavailable) {
+            return Optional.empty();
+        }
+
+        try {
+            if (irisApiInstance == null || irisShaderPackInUseMethod == null) {
+                Class<?> irisApiClass = Class.forName(IRIS_API_CLASS_NAME);
+                irisApiInstance = irisApiClass.getMethod("getInstance").invoke(null);
+                irisShaderPackInUseMethod = irisApiClass.getMethod("isShaderPackInUse");
+            }
+
+            if (irisApiInstance == null) {
+                return Optional.empty();
+            }
+
+            Object result = irisShaderPackInUseMethod.invoke(irisApiInstance);
+            if (result instanceof Boolean shaderPackInUse) {
+                return Optional.of(shaderPackInUse);
+            }
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            shaderStateDetectionUnavailable = true;
+            irisApiInstance = null;
+            irisShaderPackInUseMethod = null;
+        }
+
+        return Optional.empty();
     }
 
     private static Optional<ReinforcementOutlineTarget> toOutlineTarget(ReinforcementOutlinePayload.Entry entry) {
