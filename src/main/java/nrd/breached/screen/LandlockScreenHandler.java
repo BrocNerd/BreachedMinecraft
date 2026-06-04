@@ -59,11 +59,11 @@ public class LandlockScreenHandler extends ScreenHandler {
         return properties.get(CLAIM_COST_PROPERTY);
     }
 
-    public int getDailyUpkeepCost() {
+    public int getDailyUpkeepUnits() {
         return properties.get(DAILY_UPKEEP_PROPERTY);
     }
 
-    public int getStoredUpkeepPoints() {
+    public int getStoredUpkeepUnits() {
         return properties.get(STORED_UPKEEP_PROPERTY);
     }
 

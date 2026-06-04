@@ -128,7 +128,7 @@ public class BreachedArchiveScreen extends Screen {
                     List.of(
                             new ArchiveSection(
                                     "Paying Upkeep",
-                                    "Right-click a Landlock you are authorized on and put upkeep materials into its storage. Copper, iron, gold, redstone, lapis, emeralds, and diamonds all work. Loose items are worth 1 point each, and block forms are worth 9 points each."
+                                    "Right-click a Landlock you are authorized on and put upkeep materials into its storage. Copper ingots are worth 0.25, iron ingots are worth 1, gold ingots are worth 1.5, diamonds are worth 3, emeralds are worth 2, lapis lazuli is worth 0.25, and redstone dust is worth 0.1 upkeep point. Block forms are worth 9 times the matching loose item."
                             ),
                             new ArchiveSection(
                                     "Reading the Landlock",

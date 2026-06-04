@@ -50,8 +50,8 @@ public class LandlockScreen extends HandledScreen<LandlockScreenHandler> {
         int stateColor = handler.isDecayed() ? DECAYED_COLOR : STABLE_COLOR;
         context.drawText(textRenderer, "State: " + state, 8, 20, stateColor, false);
         context.drawText(textRenderer, "Size: " + handler.getClaimCost(), LEFT_STATUS_X, 32, MUTED_TEXT_COLOR, false);
-        context.drawText(textRenderer, "Cost: " + handler.getDailyUpkeepCost() + "/day", RIGHT_STATUS_X, 32, MUTED_TEXT_COLOR, false);
-        context.drawText(textRenderer, "Stored: " + handler.getStoredUpkeepPoints(), LEFT_STATUS_X, 44, MUTED_TEXT_COLOR, false);
+        context.drawText(textRenderer, "Cost: " + formatUpkeepPoints(handler.getDailyUpkeepUnits()) + "/day", RIGHT_STATUS_X, 32, MUTED_TEXT_COLOR, false);
+        context.drawText(textRenderer, "Stored: " + formatUpkeepPoints(handler.getStoredUpkeepUnits()), LEFT_STATUS_X, 44, MUTED_TEXT_COLOR, false);
         context.drawText(textRenderer, "Protected: " + getTimeUntilDecayText(), RIGHT_STATUS_X, 44, MUTED_TEXT_COLOR, false);
         context.drawText(textRenderer, playerInventoryTitle, playerInventoryTitleX, playerInventoryTitleY, TEXT_COLOR, false);
     }
@@ -91,5 +91,20 @@ public class LandlockScreen extends HandledScreen<LandlockScreenHandler> {
         }
 
         return hours / 24 + "d";
+    }
+
+    private static String formatUpkeepPoints(int units) {
+        int points = Math.max(0, units);
+        int whole = points / 100;
+        int fraction = points % 100;
+        if (fraction == 0) {
+            return Integer.toString(whole);
+        }
+
+        if (fraction % 10 == 0) {
+            return whole + "." + (fraction / 10);
+        }
+
+        return whole + "." + (fraction < 10 ? "0" : "") + fraction;
     }
 }
