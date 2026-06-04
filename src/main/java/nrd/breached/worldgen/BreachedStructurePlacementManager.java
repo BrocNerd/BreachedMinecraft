@@ -5559,8 +5559,16 @@ public final class BreachedStructurePlacementManager {
             }
 
             player.sendMessage(Text.literal("Protected Breached structures cannot be modified."), false);
+            syncRejectedBlockPlacement(player);
             return ActionResult.FAIL;
         });
+    }
+
+    private static void syncRejectedBlockPlacement(PlayerEntity player) {
+        if (player instanceof ServerPlayerEntity serverPlayer) {
+            serverPlayer.getInventory().markDirty();
+            serverPlayer.currentScreenHandler.syncState();
+        }
     }
 
     private static void registerSafezoneEvents() {
