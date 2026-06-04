@@ -1,6 +1,7 @@
 package nrd.breached.landlock;
 
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -19,6 +20,7 @@ public final class LandlockClaimManager {
     public static final int MIN_LANDLOCK_CENTER_SPACING = 32;
     public static final int MAX_AUTHORIZED_LANDLOCKS = 3;
     public static final int MIN_LANDLOCK_PLACEMENT_Y = 60;
+    private static final long LOCKDOWN_DELAY_TICKS = 20L * 60L * 10L;
 
     private LandlockClaimManager() {
     }
@@ -61,13 +63,28 @@ public final class LandlockClaimManager {
             return false;
         }
 
-        for (var player : serverWorld.getServer().getPlayerManager().getPlayerList()) {
-            if (landlock.isAuthorized(player.getUuid())) {
-                return false;
-            }
+        MinecraftServer server = serverWorld.getServer();
+        if (server == null) {
+            return false;
         }
 
-        return true;
+        if (hasAuthorizedPlayerOnline(server, landlock)) {
+            landlock.markAuthorizedPlayerOnline(serverWorld.getTime());
+            return false;
+        }
+
+        return landlock.hasLockdownDelayElapsed(serverWorld.getTime(), LOCKDOWN_DELAY_TICKS);
+    }
+
+    public static void refreshLockdownPresence(World world, LandlockBlockEntity landlock) {
+        if (!(world instanceof ServerWorld serverWorld)) {
+            return;
+        }
+
+        MinecraftServer server = serverWorld.getServer();
+        if (server != null && hasAuthorizedPlayerOnline(server, landlock)) {
+            landlock.markAuthorizedPlayerOnline(serverWorld.getTime());
+        }
     }
 
     public static boolean isClaimDecayed(World world, BlockPos targetPos) {
@@ -202,6 +219,16 @@ public final class LandlockClaimManager {
                 && Math.abs(dy) <= radius
                 && Math.abs(dz) <= radius
                 && dx * dx + dy * dy + dz * dz <= radius * radius;
+    }
+
+    private static boolean hasAuthorizedPlayerOnline(MinecraftServer server, LandlockBlockEntity landlock) {
+        for (var player : server.getPlayerManager().getPlayerList()) {
+            if (landlock.isAuthorized(player.getUuid())) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static boolean visitLoadedLandlocks(ServerWorld world, LandlockVisitor visitor) {

@@ -26,6 +26,7 @@ import java.util.UUID;
 
 public class LandlockBlock extends BlockWithEntity {
     public static final MapCodec<LandlockBlock> CODEC = createCodec(LandlockBlock::new);
+    private static final int HIGH_INITIAL_CLAIM_SIZE_WARNING_THRESHOLD = 750;
 
     public LandlockBlock(AbstractBlock.Settings settings) {
         super(settings);
@@ -57,6 +58,8 @@ public class LandlockBlock extends BlockWithEntity {
 
         if (!world.isClient() && placer instanceof PlayerEntity player && world.getBlockEntity(pos) instanceof LandlockBlockEntity landlock) {
             landlock.setOwner(player);
+            landlock.refreshClaimCost();
+            warnIfInitialClaimSizeIsHigh(player, landlock);
             updateLandlockMapState(world, landlock);
         }
     }
@@ -104,6 +107,16 @@ public class LandlockBlock extends BlockWithEntity {
 
     private static void openUpkeepInventory(PlayerEntity player, LandlockBlockEntity landlock) {
         player.openHandledScreen(landlock);
+    }
+
+    private static void warnIfInitialClaimSizeIsHigh(PlayerEntity player, LandlockBlockEntity landlock) {
+        int claimSize = landlock.getCachedClaimCost();
+        if (claimSize <= HIGH_INITIAL_CLAIM_SIZE_WARNING_THRESHOLD) {
+            return;
+        }
+
+        player.sendMessage(Text.literal("Landlock Size is " + claimSize
+                + ". Claims covering more blocks are harder to upkeep. Use a Probe to move the claim center if this was not intentional."), false);
     }
 
     private static void handleSneakUse(World world, PlayerEntity player, LandlockBlockEntity landlock, UUID ownerUuid) {

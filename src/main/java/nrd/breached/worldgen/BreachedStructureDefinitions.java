@@ -396,6 +396,54 @@ public final class BreachedStructureDefinitions {
             BreachedStructureDefinition.PrePlacementCheck.NONE
     );
 
+    public static final BreachedStructureDefinition SANCTUARY = new BreachedStructureDefinition(
+            "sanctuary.nbt",
+            Identifier.of(Breached.MOD_ID, "sanctuary"),
+            World.OVERWORLD,
+            1,
+            128,
+            BreachedStructureDefinition.PlacementMode.CENTER_RADIUS,
+            0,
+            0,
+            0,
+            0,
+            0,
+            250,
+            1050,
+            false,
+            0x0D3A7C91B64E25F8L,
+            64,
+            550,
+            220,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            true,
+            false,
+            18,
+            BreachedStructureDefinition.SpawnImportance.REQUIRED,
+            BreachedStructureDefinition.SpacingGroup.MAJOR,
+            BreachedStructureDefinition.SpacingPolicy.MAJOR_ONLY,
+            0,
+            0,
+            BreachedStructureDefinition.AirPlacementMode.PLACE_AIR,
+            BreachedStructureDefinition.TerrainValidation.LENIENT,
+            BreachedStructureDefinition.HeightSelection.MEDIAN_SURFACE,
+            16,
+            BlockMirror.NONE,
+            BlockRotation.NONE,
+            BreachedStructureDefinition.SurfaceRequirement.ALLOW_WATER,
+            BreachedStructureDefinition.SupportMode.NONE,
+            Blocks.AIR,
+            Blocks.AIR,
+            0,
+            BreachedStructureDefinition.PrePlacementCheck.NONE
+    );
+
     public static final BreachedStructureDefinition ABANDONED_HUT = new BreachedStructureDefinition(
             "abandonedhut.nbt",
             Identifier.of(Breached.MOD_ID, "abandonedhut"),
@@ -1124,7 +1172,8 @@ public final class BreachedStructureDefinitions {
             HORACE,
             PINK_TREE,
             BIG_BOAT,
-            EYEBALL
+            EYEBALL,
+            SANCTUARY
     );
 
     public static final List<BreachedStructureDefinition> MINOR_POI_STRUCTURES = List.of(
@@ -1166,6 +1215,7 @@ public final class BreachedStructureDefinitions {
             PINK_TREE,
             BIG_BOAT,
             EYEBALL,
+            SANCTUARY,
             ABANDONED_HUT,
             DEATH,
             CADEN_BOAT,
@@ -1191,7 +1241,8 @@ public final class BreachedStructureDefinitions {
             HORACE,
             PINK_TREE,
             BIG_BOAT,
-            EYEBALL
+            EYEBALL,
+            SANCTUARY
     );
 
     private BreachedStructureDefinitions() {

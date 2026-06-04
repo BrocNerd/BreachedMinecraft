@@ -6,11 +6,13 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.block.Block;
-import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.BubbleColumnBlock;
 import net.minecraft.block.LeavesBlock;
 import net.minecraft.block.NetherPortalBlock;
-import net.minecraft.block.BlockState;
+import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.enums.DoubleBlockHalf;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.inventory.Inventory;
@@ -25,6 +27,7 @@ import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.state.property.Properties;
 import net.minecraft.structure.StructureTemplate;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
@@ -59,7 +62,6 @@ public final class BreachedStructurePlacementManager {
     private static final int MAX_FORCED_CHUNK_TICKS = 200;
     private static final int MAX_FORCED_RESTOCK_CHUNK_TICKS = 200;
     private static final int MAX_FORCED_MINOR_DESPAWN_CHUNK_TICKS = 200;
-    private static final int MAX_PLANNED_STRUCTURE_COMPLETIONS_PER_TICK = 1;
     private static final int REMOVE_BLOCK_WITHOUT_DROPS_FLAGS = Block.NOTIFY_LISTENERS | Block.SKIP_DROPS;
     private static final int PORTAL_EVENT_DURATION_TICKS = 20 * 60 * 60;
     private static final int PORTAL_MIN_RESTOCK_INTERVAL_TICKS = 20 * 60 * 65;
@@ -84,6 +86,7 @@ public final class BreachedStructurePlacementManager {
     private static final String PORTAL_STRUCTURE_KEY = BreachedStructureDefinitions.key(BreachedStructureDefinitions.OFFICIAL_NETHER_PORTAL);
     private static final String EYEBALL_STRUCTURE_KEY = BreachedStructureDefinitions.key(BreachedStructureDefinitions.EYEBALL);
     private static final String SKYHOME_STRUCTURE_KEY = BreachedStructureDefinitions.key(BreachedStructureDefinitions.SKY_HOME);
+    private static final String SANCTUARY_STRUCTURE_KEY = BreachedStructureDefinitions.key(BreachedStructureDefinitions.SANCTUARY);
     private static final int END_PORTAL_TOWNHALL_Y_OFFSET = 96;
     private static final int EYEBALL_BORDER_MARGIN_BLOCKS = 100;
     private static final int EYEBALL_CANDIDATE_SPREAD_BLOCKS = 48;
@@ -91,6 +94,21 @@ public final class BreachedStructurePlacementManager {
     private static final int MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN = 12;
     private static final int SKYHOME_MIN_ORIGIN_Y = 120;
     private static final int SKYHOME_MAX_ORIGIN_Y = 200;
+    private static final int SANCTUARY_TARGET_ORIGIN_Y = -48;
+    private static final int SANCTUARY_MIN_SURFACE_CLEARANCE = 24;
+    private static final int SANCTUARY_BORDER_MARGIN_BLOCKS = 16;
+    private static final int SANCTUARY_VOLUME_SAMPLE_STEP = 6;
+    private static final int SANCTUARY_FALL_SHAFT_RADIUS = 1;
+    private static final int SANCTUARY_CORNER_COLUMN_SEARCH_MARGIN = 16;
+    private static final int SANCTUARY_CORNER_COLUMN_FALLBACK_INSET = 4;
+    private static final int SANCTUARY_SURFACE_EXIT_CLEARANCE = 2;
+    private static final int SANCTUARY_SURFACE_VEGETATION_CLEAR_RADIUS = 3;
+    private static final int SANCTUARY_SURFACE_VEGETATION_CLEAR_DEPTH = 8;
+    private static final int SANCTUARY_ACCESS_PROTECTION_MARGIN = 4;
+    private static final int SANCTUARY_ACCESS_PROTECTION_SURFACE_PADDING = 3;
+    private static final double SANCTUARY_AIR_SAMPLE_PENALTY = 100_000.0D;
+    private static final double SANCTUARY_SHELL_AIR_SAMPLE_PENALTY = 180_000.0D;
+    private static final double SANCTUARY_NON_DEEPSLATE_SAMPLE_PENALTY = 3_000.0D;
     private static final int BIG_BOAT_MIN_EXPANDED_CANDIDATES = 384;
     private static final int BIG_BOAT_MAX_EXPANDED_CANDIDATES = 768;
     private static final int MINOR_FOREST_VEGETATION_OBSTRUCTION_LIMIT = 256;
@@ -244,7 +262,6 @@ public final class BreachedStructurePlacementManager {
                     return;
                 }
 
-                int completedPlannedStructures = 0;
                 for (BreachedStructureDefinition definition : BreachedStructureDefinitions.PLANNED_STRUCTURES) {
                     BreachedStructureDefinition activeDefinition = getActiveDefinition(world, definition);
                     if (!world.getRegistryKey().equals(activeDefinition.requiredDimension())) {
@@ -309,12 +326,8 @@ public final class BreachedStructurePlacementManager {
                     }
 
                     if (handledPlacement) {
-                        completedPlannedStructures++;
                         diagnostics.plannedStructuresCompleted++;
-                        if (completedPlannedStructures >= MAX_PLANNED_STRUCTURE_COMPLETIONS_PER_TICK) {
-                            return;
-                        }
-                        continue;
+                        return;
                     }
 
                     if (bestEvaluation != null) {
@@ -322,12 +335,8 @@ public final class BreachedStructurePlacementManager {
                         if (countPlacedStructures(state, structureKey) >= activeDefinition.countPerWorld()) {
                             PENDING_PLACEMENTS.removeIf(pending -> pending.worldSeed() == world.getSeed() && pending.structureKey().equals(structureKey));
                         }
-                        completedPlannedStructures++;
                         diagnostics.plannedStructuresCompleted++;
-                        if (completedPlannedStructures >= MAX_PLANNED_STRUCTURE_COMPLETIONS_PER_TICK) {
-                            return;
-                        }
-                        continue;
+                        return;
                     }
 
                     if (!hasRemainingCandidates(world, state, activeDefinition, structureKey)) {
@@ -477,6 +486,9 @@ public final class BreachedStructurePlacementManager {
         }
         if (structureKey.equals(EYEBALL_STRUCTURE_KEY)) {
             return Text.literal("Entering Eyeball").formatted(Formatting.DARK_RED);
+        }
+        if (structureKey.equals(SANCTUARY_STRUCTURE_KEY)) {
+            return Text.literal("Entering the Sanctuary").formatted(Formatting.DARK_GREEN);
         }
 
         return Text.literal("Entering major structure").formatted(Formatting.GOLD);
@@ -2518,11 +2530,23 @@ public final class BreachedStructurePlacementManager {
             return new PlannedCandidateEvaluation(pendingPlacement, null, null, Double.MAX_VALUE, PlacementAttemptResult.FAILED);
         }
 
+        ObstructionEvaluation undergroundFit = evaluateUndergroundMajorPlacement(world, definition, template.get(), footprintSize, site);
+        if (!undergroundFit.accepted()) {
+            state.markCandidateFailed(structureKey, candidate.index());
+            System.out.println("[Breached] Rejected planned candidate " + candidate.index()
+                    + " for " + definition.logName()
+                    + " at x " + candidate.x()
+                    + ", z " + candidate.z()
+                    + ", radius " + candidate.radius()
+                    + ": " + undergroundFit.rejectionReason() + ".");
+            return new PlannedCandidateEvaluation(pendingPlacement, null, null, Double.MAX_VALUE, PlacementAttemptResult.FAILED);
+        }
+
         return new PlannedCandidateEvaluation(
                 pendingPlacement,
                 template.get(),
                 site,
-                site.score() + obstruction.penalty() + spacing.penalty(),
+                site.score() + obstruction.penalty() + undergroundFit.penalty() + spacing.penalty(),
                 PlacementAttemptResult.READY
         );
     }
@@ -2556,6 +2580,8 @@ public final class BreachedStructurePlacementManager {
                 evaluation.site()
         );
         BreachedStructureSupportGenerator.generate(world, definition, placement);
+        applySanctuaryAccessFeatures(world, definition, placement);
+        restoreSanctuaryPitcherCrops(world, definition, evaluation.template(), placement);
         state.markPlaced(
                 pendingPlacement.placementKey(),
                 placement,
@@ -2677,11 +2703,19 @@ public final class BreachedStructurePlacementManager {
             return getSkyHomeOriginY(world, definition, site);
         }
 
+        if (isSanctuaryStructure(definition)) {
+            return getSanctuaryOriginY(world, definition, site, template);
+        }
+
         return site.surfaceY() + definition.placementOffsetY();
     }
 
     private static boolean isSkyHomeStructure(BreachedStructureDefinition definition) {
         return BreachedStructureDefinitions.key(definition).equals(SKYHOME_STRUCTURE_KEY);
+    }
+
+    private static boolean isSanctuaryStructure(BreachedStructureDefinition definition) {
+        return BreachedStructureDefinitions.key(definition).equals(SANCTUARY_STRUCTURE_KEY);
     }
 
     private static boolean isCaveMinorPoi(BreachedStructureDefinition definition) {
@@ -2806,6 +2840,10 @@ public final class BreachedStructurePlacementManager {
             return generateSwordStatueCandidatesOpposedToPinkTree(world, definition);
         }
 
+        if (isSanctuaryStructure(definition)) {
+            return generateSanctuaryBorderCandidates(world, definition);
+        }
+
         return generateRadiusCandidates(world, definition);
     }
 
@@ -2895,6 +2933,96 @@ public final class BreachedStructurePlacementManager {
         return candidates;
     }
 
+    private static List<BreachedStructureSpawnManager.RadiusCandidate> generateSanctuaryBorderCandidates(
+            ServerWorld world,
+            BreachedStructureDefinition definition
+    ) {
+        Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, definition);
+        Vec3i footprintSize = template
+                .map(value -> BreachedStructureSpawnManager.getRotatedSize(value.getSize(), definition.rotation()))
+                .orElse(new Vec3i(1, 1, 1));
+        int sizeX = Math.max(1, footprintSize.getX());
+        int sizeZ = Math.max(1, footprintSize.getZ());
+
+        StructureOriginBounds bounds = getBorderContainedOriginBounds(world, sizeX, sizeZ, SANCTUARY_BORDER_MARGIN_BLOCKS);
+        if (!bounds.valid()) {
+            return List.of();
+        }
+
+        int candidateCount = Math.max(definition.countPerWorld(), definition.plannedCandidateCount());
+        List<BreachedStructureSpawnManager.RadiusCandidate> candidates = new ArrayList<>();
+        java.util.Random random = new java.util.Random(world.getSeed() ^ definition.seedSalt());
+        for (int candidateIndex = 0; candidateIndex < candidateCount; candidateIndex++) {
+            BreachedStructureSpawnManager.RadiusCandidate candidate = createSanctuaryBorderCandidate(
+                    definition,
+                    bounds,
+                    sizeX,
+                    sizeZ,
+                    random,
+                    candidateIndex + 1
+            );
+            if (candidate != null) {
+                candidates.add(candidate);
+            }
+        }
+
+        return candidates;
+    }
+
+    private static BreachedStructureSpawnManager.RadiusCandidate createSanctuaryBorderCandidate(
+            BreachedStructureDefinition definition,
+            StructureOriginBounds bounds,
+            int sizeX,
+            int sizeZ,
+            java.util.Random random,
+            int candidateIndex
+    ) {
+        int attempts = 64;
+        int fallbackX = bounds.minX();
+        int fallbackZ = bounds.minZ();
+        int fallbackRadius = Integer.MAX_VALUE;
+        double fallbackAngle = 0.0D;
+        int fallbackPenalty = Integer.MAX_VALUE;
+
+        for (int attempt = 0; attempt < attempts; attempt++) {
+            int x = randomBetween(random, bounds.minX(), bounds.maxX());
+            int z = randomBetween(random, bounds.minZ(), bounds.maxZ());
+            int centerX = x + sizeX / 2;
+            int centerZ = z + sizeZ / 2;
+            int radius = distanceFromDefinitionCenter(definition, centerX, centerZ);
+            double angle = Math.atan2(centerZ - definition.centerZ(), centerX - definition.centerX());
+
+            if (radius >= definition.minRadius() && radius <= definition.maxRadius()) {
+                return new BreachedStructureSpawnManager.RadiusCandidate(candidateIndex, x, z, radius, angle);
+            }
+
+            int ringPenalty = radius < definition.minRadius()
+                    ? definition.minRadius() - radius
+                    : radius - definition.maxRadius();
+            if (ringPenalty < fallbackPenalty) {
+                fallbackX = x;
+                fallbackZ = z;
+                fallbackRadius = radius;
+                fallbackAngle = angle;
+                fallbackPenalty = ringPenalty;
+            }
+        }
+
+        if (fallbackPenalty != Integer.MAX_VALUE) {
+            return new BreachedStructureSpawnManager.RadiusCandidate(candidateIndex, fallbackX, fallbackZ, fallbackRadius, fallbackAngle);
+        }
+
+        return null;
+    }
+
+    private static int randomBetween(java.util.Random random, int min, int max) {
+        if (min >= max) {
+            return min;
+        }
+
+        return min + random.nextInt(max - min + 1);
+    }
+
     private static double getEffectiveOverworldBorderSize(ServerWorld world) {
         double borderSize = world.getWorldBorder().getSize();
         if (borderSize < 100_000.0D) {
@@ -2915,6 +3043,37 @@ public final class BreachedStructurePlacementManager {
         }
 
         return Math.max(min, Math.min(max, value));
+    }
+
+    private static StructureOriginBounds getBorderContainedOriginBounds(
+            ServerWorld world,
+            int sizeX,
+            int sizeZ,
+            int margin
+    ) {
+        double borderSize = getEffectiveOverworldBorderSize(world);
+        double borderHalfSize = borderSize / 2.0D;
+        int minBorderX = (int) Math.ceil(world.getWorldBorder().getCenterX() - borderHalfSize);
+        int maxBorderX = (int) Math.floor(world.getWorldBorder().getCenterX() + borderHalfSize);
+        int minBorderZ = (int) Math.ceil(world.getWorldBorder().getCenterZ() - borderHalfSize);
+        int maxBorderZ = (int) Math.floor(world.getWorldBorder().getCenterZ() + borderHalfSize);
+
+        int inset = Math.max(0, margin);
+        int minOriginX = minBorderX + inset;
+        int maxOriginX = maxBorderX - inset - sizeX;
+        int minOriginZ = minBorderZ + inset;
+        int maxOriginZ = maxBorderZ - inset - sizeZ;
+
+        if (minOriginX > maxOriginX) {
+            minOriginX = minBorderX;
+            maxOriginX = maxBorderX - sizeX;
+        }
+        if (minOriginZ > maxOriginZ) {
+            minOriginZ = minBorderZ;
+            maxOriginZ = maxBorderZ - sizeZ;
+        }
+
+        return new StructureOriginBounds(minOriginX, maxOriginX, minOriginZ, maxOriginZ);
     }
 
     private static int distanceBetween(int firstX, int firstZ, int secondX, int secondZ) {
@@ -3135,7 +3294,7 @@ public final class BreachedStructurePlacementManager {
                 diagnostics.majorContainersRestocked += restockedContainers;
                 if (lootConfig.announceRestocks) {
                     getMajorRestockAnnouncement(entry.getKey()).ifPresent(message ->
-                            world.getServer().getPlayerManager().broadcast(message, false)
+                            broadcastServerMessage(world, message)
                     );
                 }
                 System.out.println("[Breached] Restocked " + restockedContainers
@@ -3239,7 +3398,7 @@ public final class BreachedStructurePlacementManager {
 
         if (lootConfig.announceRestocks) {
             getMajorRestockAnnouncement(getPortalStructureKey(portalEventType)).ifPresent(message ->
-                    world.getServer().getPlayerManager().broadcast(message, false)
+                    broadcastServerMessage(world, message)
             );
         }
 
@@ -3408,6 +3567,10 @@ public final class BreachedStructurePlacementManager {
     }
 
     private static void broadcastPortalEventMessage(ServerWorld world, Text message) {
+        broadcastServerMessage(world, message);
+    }
+
+    private static void broadcastServerMessage(ServerWorld world, Text message) {
         MinecraftServer server = world.getServer();
         if (server != null) {
             server.getPlayerManager().broadcast(message, false);
@@ -4593,6 +4756,638 @@ public final class BreachedStructurePlacementManager {
                 .anyMatch(definition -> BreachedStructureDefinitions.key(definition).equals(structureKey));
     }
 
+    private static ObstructionEvaluation evaluateUndergroundMajorPlacement(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            Vec3i footprintSize,
+            BreachedStructureSite site
+    ) {
+        if (!isSanctuaryStructure(definition)) {
+            return new ObstructionEvaluation(true, 0.0D, null);
+        }
+
+        int originY = getSanctuaryOriginY(world, definition, site, template);
+        int sizeX = Math.max(1, footprintSize.getX());
+        int sizeZ = Math.max(1, footprintSize.getZ());
+        StructureOriginBounds bounds = getBorderContainedOriginBounds(world, sizeX, sizeZ, SANCTUARY_BORDER_MARGIN_BLOCKS);
+        if (!bounds.valid()) {
+            return new ObstructionEvaluation(false, Double.MAX_VALUE,
+                    "sanctuary footprint was too large for the active world border");
+        }
+        if (!bounds.contains(site.originX(), site.originZ())) {
+            return new ObstructionEvaluation(false, Double.MAX_VALUE,
+                    "sanctuary footprint was outside the active world border");
+        }
+
+        int maxY = originY + Math.max(1, footprintSize.getY()) - 1;
+        int maxAllowedY = site.minSurfaceY() - SANCTUARY_MIN_SURFACE_CLEARANCE;
+        if (maxY > maxAllowedY) {
+            return new ObstructionEvaluation(false, Double.MAX_VALUE,
+                    "sanctuary was too close to surface: top y " + maxY + ", max " + maxAllowedY);
+        }
+
+        int sampledBlocks = 0;
+        int airSamples = 0;
+        int shellAirSamples;
+        int fluidSamples = 0;
+        int blockedSamples = 0;
+        int deepslateSamples = 0;
+
+        BlockPos origin = new BlockPos(site.originX(), originY, site.originZ());
+        for (int x : createSteppedCoordinates(origin.getX(), origin.getX() + footprintSize.getX() - 1, SANCTUARY_VOLUME_SAMPLE_STEP)) {
+            for (int y : createSteppedCoordinates(origin.getY(), origin.getY() + footprintSize.getY() - 1, SANCTUARY_VOLUME_SAMPLE_STEP)) {
+                for (int z : createSteppedCoordinates(origin.getZ(), origin.getZ() + footprintSize.getZ() - 1, SANCTUARY_VOLUME_SAMPLE_STEP)) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    sampledBlocks++;
+
+                    if (world.getBlockEntity(pos) != null) {
+                        blockedSamples++;
+                        continue;
+                    }
+
+                    if (!state.getFluidState().isEmpty()) {
+                        fluidSamples++;
+                        continue;
+                    }
+
+                    if (state.isAir() || state.getCollisionShape(world, pos).isEmpty()) {
+                        airSamples++;
+                        continue;
+                    }
+
+                    if (!isNaturalCaveReplacementState(state)) {
+                        blockedSamples++;
+                        continue;
+                    }
+
+                    if (isDeepslateCaveReplacementState(state)) {
+                        deepslateSamples++;
+                    }
+                }
+            }
+        }
+
+        if (sampledBlocks == 0) {
+            return new ObstructionEvaluation(false, Double.MAX_VALUE, "sanctuary had no underground volume samples");
+        }
+        if (fluidSamples > 0) {
+            return new ObstructionEvaluation(false, Double.MAX_VALUE,
+                    "sanctuary underground volume had " + fluidSamples + " fluid samples");
+        }
+        if (blockedSamples > 0) {
+            return new ObstructionEvaluation(false, Double.MAX_VALUE,
+                    "sanctuary underground volume had " + blockedSamples + " blocked samples");
+        }
+
+        shellAirSamples = countSanctuaryShellAirSamples(world, origin, footprintSize);
+        double penalty = (airSamples * SANCTUARY_AIR_SAMPLE_PENALTY)
+                + (shellAirSamples * SANCTUARY_SHELL_AIR_SAMPLE_PENALTY)
+                + ((sampledBlocks - deepslateSamples) * SANCTUARY_NON_DEEPSLATE_SAMPLE_PENALTY);
+        return new ObstructionEvaluation(true, penalty, null);
+    }
+
+    private static int getSanctuaryOriginY(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructureSite site,
+            StructureTemplate template
+    ) {
+        int templateHeight = template == null
+                ? 1
+                : Math.max(1, BreachedStructureSpawnManager.getRotatedSize(template.getSize(), definition.rotation()).getY());
+        int minOriginY = world.getBottomY() + 4;
+        int maxOriginY = Math.min(
+                SANCTUARY_TARGET_ORIGIN_Y,
+                site.minSurfaceY() - SANCTUARY_MIN_SURFACE_CLEARANCE - templateHeight
+        );
+        maxOriginY = Math.min(maxOriginY, world.getTopYInclusive() - templateHeight + 1);
+        return Math.max(minOriginY, maxOriginY);
+    }
+
+    private static int countSanctuaryShellAirSamples(ServerWorld world, BlockPos origin, Vec3i footprintSize) {
+        int minX = origin.getX() - 1;
+        int maxX = origin.getX() + footprintSize.getX();
+        int minY = Math.max(world.getBottomY(), origin.getY() - 1);
+        int maxY = Math.min(world.getTopYInclusive(), origin.getY() + footprintSize.getY());
+        int minZ = origin.getZ() - 1;
+        int maxZ = origin.getZ() + footprintSize.getZ();
+        int airSamples = 0;
+
+        for (int x : createSteppedCoordinates(minX, maxX, SANCTUARY_VOLUME_SAMPLE_STEP)) {
+            for (int y : createSteppedCoordinates(minY, maxY, SANCTUARY_VOLUME_SAMPLE_STEP)) {
+                for (int z : createSteppedCoordinates(minZ, maxZ, SANCTUARY_VOLUME_SAMPLE_STEP)) {
+                    if (x != minX && x != maxX && y != minY && y != maxY && z != minZ && z != maxZ) {
+                        continue;
+                    }
+
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = world.getBlockState(pos);
+                    if (state.getFluidState().isEmpty()
+                            && (state.isAir() || state.getCollisionShape(world, pos).isEmpty())) {
+                        airSamples++;
+                    }
+                }
+            }
+        }
+
+        return airSamples;
+    }
+
+    private static boolean isDeepslateCaveReplacementState(BlockState state) {
+        return state.isOf(Blocks.DEEPSLATE)
+                || state.isOf(Blocks.DEEPSLATE_COAL_ORE)
+                || state.isOf(Blocks.DEEPSLATE_IRON_ORE)
+                || state.isOf(Blocks.DEEPSLATE_COPPER_ORE)
+                || state.isOf(Blocks.DEEPSLATE_GOLD_ORE)
+                || state.isOf(Blocks.DEEPSLATE_REDSTONE_ORE)
+                || state.isOf(Blocks.DEEPSLATE_EMERALD_ORE)
+                || state.isOf(Blocks.DEEPSLATE_LAPIS_ORE)
+                || state.isOf(Blocks.DEEPSLATE_DIAMOND_ORE);
+    }
+
+    private static void applySanctuaryAccessFeatures(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacement placement
+    ) {
+        if (!isSanctuaryStructure(definition)) {
+            return;
+        }
+
+        int fallShaftBlocks = carveSanctuaryFallShaft(world, placement);
+        int bubbleColumns = 0;
+        bubbleColumns += extendSanctuaryCornerBubbleColumn(world, placement, false, false);
+        bubbleColumns += extendSanctuaryCornerBubbleColumn(world, placement, true, false);
+        bubbleColumns += extendSanctuaryCornerBubbleColumn(world, placement, false, true);
+        bubbleColumns += extendSanctuaryCornerBubbleColumn(world, placement, true, true);
+
+        System.out.println("[Breached] Added Sanctuary access features: cleared "
+                + fallShaftBlocks
+                + " fall-shaft blocks and extended "
+                + bubbleColumns
+                + " bubble columns to the surface.");
+    }
+
+    private static void restoreSanctuaryPitcherCrops(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            StructureTemplate template,
+            BreachedStructurePlacement placement
+    ) {
+        if (!isSanctuaryStructure(definition)) {
+            return;
+        }
+
+        List<BreachedStructureSpawnManager.TemplatePlacedBlock> pitcherCrops = BreachedStructureSpawnManager.getTemplatePlacedBlocks(
+                        world,
+                        definition,
+                        template,
+                        placement.origin(),
+                        definition.mirror(),
+                        definition.rotation()
+                ).stream()
+                .filter(block -> block.state().isOf(Blocks.PITCHER_CROP))
+                .sorted(BreachedStructurePlacementManager::comparePitcherCropPlacementOrder)
+                .toList();
+        if (pitcherCrops.isEmpty()) {
+            return;
+        }
+
+        int restoredBlocks = 0;
+        for (BreachedStructureSpawnManager.TemplatePlacedBlock block : pitcherCrops) {
+            if (!world.getBlockState(block.pos()).equals(block.state())) {
+                world.setBlockState(block.pos(), block.state(), REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
+                restoredBlocks++;
+            }
+        }
+
+        if (restoredBlocks > 0) {
+            System.out.println("[Breached] Restored " + restoredBlocks + " Sanctuary pitcher crop blocks after placement.");
+        }
+    }
+
+    private static int comparePitcherCropPlacementOrder(
+            BreachedStructureSpawnManager.TemplatePlacedBlock first,
+            BreachedStructureSpawnManager.TemplatePlacedBlock second
+    ) {
+        int halfComparison = Integer.compare(getPitcherCropHalfOrder(first.state()), getPitcherCropHalfOrder(second.state()));
+        if (halfComparison != 0) {
+            return halfComparison;
+        }
+
+        return Integer.compare(first.pos().getY(), second.pos().getY());
+    }
+
+    private static int getPitcherCropHalfOrder(BlockState state) {
+        if (state.contains(Properties.DOUBLE_BLOCK_HALF)
+                && state.get(Properties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER) {
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private static int carveSanctuaryFallShaft(ServerWorld world, BreachedStructurePlacement placement) {
+        BlockPos poolCenter = findSanctuaryCenterPool(world, placement);
+        int startY = Math.max(world.getBottomY(), poolCenter.getY() + 1);
+        int structureTopY = getSanctuaryStructureTopY(placement);
+        int surfaceClearedBlocks = clearSanctuarySurfaceVegetation(
+                world,
+                poolCenter.getX(),
+                poolCenter.getZ(),
+                getSanctuarySurfaceClearRadius(SANCTUARY_FALL_SHAFT_RADIUS),
+                structureTopY
+        );
+        int surfaceY = Math.min(
+                world.getTopYInclusive(),
+                getMaxSurfaceYForArea(world, poolCenter.getX(), poolCenter.getZ(), SANCTUARY_FALL_SHAFT_RADIUS)
+        );
+        int clearedBlocks = 0;
+
+        for (int y = startY; y <= surfaceY; y++) {
+            for (int xOffset = -SANCTUARY_FALL_SHAFT_RADIUS; xOffset <= SANCTUARY_FALL_SHAFT_RADIUS; xOffset++) {
+                for (int zOffset = -SANCTUARY_FALL_SHAFT_RADIUS; zOffset <= SANCTUARY_FALL_SHAFT_RADIUS; zOffset++) {
+                    BlockPos pos = new BlockPos(poolCenter.getX() + xOffset, y, poolCenter.getZ() + zOffset);
+                    if (!world.getBlockState(pos).isAir()) {
+                        world.setBlockState(pos, Blocks.AIR.getDefaultState(), REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
+                        clearedBlocks++;
+                    }
+                }
+            }
+        }
+
+        int sleeveStartY = Math.max(structureTopY, startY);
+        int sleeveTopY = surfaceY - 1;
+        int sleeveBlocks = sleeveStartY <= sleeveTopY
+                ? placeSanctuaryAccessSleeve(
+                        world,
+                        poolCenter.getX(),
+                        poolCenter.getZ(),
+                        sleeveStartY,
+                        sleeveTopY,
+                        SANCTUARY_FALL_SHAFT_RADIUS
+                )
+                : 0;
+        int exitBlocks = clearSanctuarySurfaceExit(world, poolCenter.getX(), poolCenter.getZ(), surfaceY, SANCTUARY_FALL_SHAFT_RADIUS);
+        return surfaceClearedBlocks + clearedBlocks + sleeveBlocks + exitBlocks;
+    }
+
+    private static BlockPos findSanctuaryCenterPool(ServerWorld world, BreachedStructurePlacement placement) {
+        int centerX = placement.origin().getX() + Math.max(1, placement.size().getX()) / 2;
+        int centerZ = placement.origin().getZ() + Math.max(1, placement.size().getZ()) / 2;
+        int searchRadius = Math.max(4, Math.min(16, Math.min(placement.size().getX(), placement.size().getZ()) / 4));
+        int minY = Math.max(world.getBottomY(), placement.origin().getY());
+        int maxY = Math.min(world.getTopYInclusive(), placement.origin().getY() + Math.max(1, placement.size().getY()) - 1);
+
+        BlockPos bestPos = null;
+        int bestWaterBlocks = 0;
+        long bestDistanceSquared = Long.MAX_VALUE;
+        int bestY = Integer.MIN_VALUE;
+
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = centerX - searchRadius; x <= centerX + searchRadius; x++) {
+                for (int z = centerZ - searchRadius; z <= centerZ + searchRadius; z++) {
+                    int waterBlocks = countSanctuaryWaterBlocks(world, x, y, z, SANCTUARY_FALL_SHAFT_RADIUS);
+                    if (waterBlocks < 5) {
+                        continue;
+                    }
+
+                    long distanceSquared = squaredDistance2d(x, z, centerX, centerZ);
+                    if (waterBlocks > bestWaterBlocks
+                            || waterBlocks == bestWaterBlocks && distanceSquared < bestDistanceSquared
+                            || waterBlocks == bestWaterBlocks && distanceSquared == bestDistanceSquared && y > bestY) {
+                        bestPos = new BlockPos(x, y, z);
+                        bestWaterBlocks = waterBlocks;
+                        bestDistanceSquared = distanceSquared;
+                        bestY = y;
+                    }
+                }
+            }
+        }
+
+        if (bestPos != null) {
+            return bestPos;
+        }
+
+        return new BlockPos(centerX, placement.origin().getY(), centerZ);
+    }
+
+    private static int countSanctuaryWaterBlocks(ServerWorld world, int centerX, int y, int centerZ, int radius) {
+        int waterBlocks = 0;
+        for (int xOffset = -radius; xOffset <= radius; xOffset++) {
+            for (int zOffset = -radius; zOffset <= radius; zOffset++) {
+                if (isSanctuaryWaterAccessBlock(world.getBlockState(new BlockPos(centerX + xOffset, y, centerZ + zOffset)))) {
+                    waterBlocks++;
+                }
+            }
+        }
+
+        return waterBlocks;
+    }
+
+    private static int extendSanctuaryCornerBubbleColumn(
+            ServerWorld world,
+            BreachedStructurePlacement placement,
+            boolean east,
+            boolean south
+    ) {
+        BlockPos columnStart = findSanctuaryCornerWaterColumn(world, placement, east, south)
+                .orElseGet(() -> getSanctuaryFallbackCornerColumnStart(placement, east, south));
+        int structureTopY = getSanctuaryStructureTopY(placement);
+        clearSanctuarySurfaceVegetation(
+                world,
+                columnStart.getX(),
+                columnStart.getZ(),
+                getSanctuarySurfaceClearRadius(0),
+                structureTopY
+        );
+        int columnStartY = Math.max(structureTopY, columnStart.getY());
+        int surfaceY = Math.min(
+                world.getTopYInclusive(),
+                getSanctuaryAccessSurfaceY(world, columnStart.getX(), columnStart.getZ())
+        );
+        int columnTopY = surfaceY - 1;
+        if (columnStartY > columnTopY) {
+            return 0;
+        }
+
+        BlockState upwardBubbleColumn = Blocks.BUBBLE_COLUMN.getDefaultState().with(BubbleColumnBlock.DRAG, false);
+        for (int y = columnStartY; y <= columnTopY; y++) {
+            world.setBlockState(new BlockPos(columnStart.getX(), y, columnStart.getZ()), upwardBubbleColumn, REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
+        }
+
+        int exitTopY = Math.min(world.getTopYInclusive(), surfaceY + SANCTUARY_SURFACE_EXIT_CLEARANCE);
+        for (int y = surfaceY; y <= exitTopY; y++) {
+            world.setBlockState(new BlockPos(columnStart.getX(), y, columnStart.getZ()), Blocks.AIR.getDefaultState(), REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
+        }
+        if (columnStartY <= columnTopY) {
+            placeSanctuaryAccessSleeve(world, columnStart.getX(), columnStart.getZ(), columnStartY, columnTopY, 0);
+        }
+        clearSanctuarySurfaceExit(world, columnStart.getX(), columnStart.getZ(), surfaceY, 0);
+
+        return 1;
+    }
+
+    private static int placeSanctuaryAccessSleeve(
+            ServerWorld world,
+            int centerX,
+            int centerZ,
+            int minY,
+            int maxY,
+            int shaftRadius
+    ) {
+        int sleeveRadius = shaftRadius + 1;
+        int placedBlocks = 0;
+
+        for (int y = Math.max(world.getBottomY(), minY); y <= Math.min(world.getTopYInclusive(), maxY); y++) {
+            for (int xOffset = -sleeveRadius; xOffset <= sleeveRadius; xOffset++) {
+                for (int zOffset = -sleeveRadius; zOffset <= sleeveRadius; zOffset++) {
+                    if (Math.abs(xOffset) <= shaftRadius && Math.abs(zOffset) <= shaftRadius) {
+                        continue;
+                    }
+
+                    BlockPos pos = new BlockPos(centerX + xOffset, y, centerZ + zOffset);
+                    if (canReplaceWithSanctuaryAccessBrick(world, pos)) {
+                        world.setBlockState(pos, Blocks.DEEPSLATE_BRICKS.getDefaultState(), REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
+                        placedBlocks++;
+                    }
+                }
+            }
+        }
+
+        return placedBlocks;
+    }
+
+    private static boolean canReplaceWithSanctuaryAccessBrick(ServerWorld world, BlockPos pos) {
+        if (world.getBlockEntity(pos) != null) {
+            return false;
+        }
+
+        BlockState state = world.getBlockState(pos);
+        return state.isAir()
+                || !state.getFluidState().isEmpty()
+                || isNaturalCaveReplacementState(state)
+                || state.isIn(BlockTags.LOGS)
+                || state.isIn(BlockTags.LEAVES)
+                || state.isIn(BlockTags.FLOWERS)
+                || state.isOf(Blocks.TALL_GRASS)
+                || state.isOf(Blocks.SHORT_GRASS)
+                || state.isOf(Blocks.FERN)
+                || state.isOf(Blocks.LARGE_FERN)
+                || state.isOf(Blocks.VINE)
+                || state.isOf(Blocks.LEAF_LITTER)
+                || state.isOf(Blocks.SNOW);
+    }
+
+    private static Optional<BlockPos> findSanctuaryCornerWaterColumn(
+            ServerWorld world,
+            BreachedStructurePlacement placement,
+            boolean east,
+            boolean south
+    ) {
+        int minX = placement.origin().getX();
+        int maxX = placement.origin().getX() + Math.max(1, placement.size().getX()) - 1;
+        int minZ = placement.origin().getZ();
+        int maxZ = placement.origin().getZ() + Math.max(1, placement.size().getZ()) - 1;
+        int searchMinX = east ? Math.max(minX, maxX - SANCTUARY_CORNER_COLUMN_SEARCH_MARGIN) : minX;
+        int searchMaxX = east ? maxX : Math.min(maxX, minX + SANCTUARY_CORNER_COLUMN_SEARCH_MARGIN);
+        int searchMinZ = south ? Math.max(minZ, maxZ - SANCTUARY_CORNER_COLUMN_SEARCH_MARGIN) : minZ;
+        int searchMaxZ = south ? maxZ : Math.min(maxZ, minZ + SANCTUARY_CORNER_COLUMN_SEARCH_MARGIN);
+        int cornerX = east ? maxX : minX;
+        int cornerZ = south ? maxZ : minZ;
+        int minY = Math.max(world.getBottomY(), placement.origin().getY());
+        int maxY = Math.min(world.getTopYInclusive(), placement.origin().getY() + Math.max(1, placement.size().getY()) - 1);
+
+        BlockPos bestPos = null;
+        int bestWaterHeight = 0;
+        long bestCornerDistanceSquared = Long.MAX_VALUE;
+        int bestStartY = Integer.MAX_VALUE;
+
+        for (int x = searchMinX; x <= searchMaxX; x++) {
+            for (int z = searchMinZ; z <= searchMaxZ; z++) {
+                int waterHeight = 0;
+                int firstWaterY = Integer.MAX_VALUE;
+                for (int y = minY; y <= maxY; y++) {
+                    if (isSanctuaryWaterAccessBlock(world.getBlockState(new BlockPos(x, y, z)))) {
+                        waterHeight++;
+                        firstWaterY = Math.min(firstWaterY, y);
+                    }
+                }
+
+                if (waterHeight < 2) {
+                    continue;
+                }
+
+                long cornerDistanceSquared = squaredDistance2d(x, z, cornerX, cornerZ);
+                if (waterHeight > bestWaterHeight
+                        || waterHeight == bestWaterHeight && cornerDistanceSquared < bestCornerDistanceSquared
+                        || waterHeight == bestWaterHeight && cornerDistanceSquared == bestCornerDistanceSquared && firstWaterY < bestStartY) {
+                    bestPos = new BlockPos(x, firstWaterY, z);
+                    bestWaterHeight = waterHeight;
+                    bestCornerDistanceSquared = cornerDistanceSquared;
+                    bestStartY = firstWaterY;
+                }
+            }
+        }
+
+        return Optional.ofNullable(bestPos);
+    }
+
+    private static BlockPos getSanctuaryFallbackCornerColumnStart(
+            BreachedStructurePlacement placement,
+            boolean east,
+            boolean south
+    ) {
+        int minX = placement.origin().getX();
+        int maxX = placement.origin().getX() + Math.max(1, placement.size().getX()) - 1;
+        int minZ = placement.origin().getZ();
+        int maxZ = placement.origin().getZ() + Math.max(1, placement.size().getZ()) - 1;
+        int x = east
+                ? Math.max(minX, maxX - SANCTUARY_CORNER_COLUMN_FALLBACK_INSET)
+                : Math.min(maxX, minX + SANCTUARY_CORNER_COLUMN_FALLBACK_INSET);
+        int z = south
+                ? Math.max(minZ, maxZ - SANCTUARY_CORNER_COLUMN_FALLBACK_INSET)
+                : Math.min(maxZ, minZ + SANCTUARY_CORNER_COLUMN_FALLBACK_INSET);
+        int y = placement.origin().getY() + 1;
+        return new BlockPos(x, y, z);
+    }
+
+    private static int getSanctuaryStructureTopY(BreachedStructurePlacement placement) {
+        return placement.origin().getY() + Math.max(1, placement.size().getY());
+    }
+
+    private static int getMaxSurfaceYForArea(ServerWorld world, int centerX, int centerZ, int radius) {
+        int maxSurfaceY = world.getBottomY();
+        for (int xOffset = -radius; xOffset <= radius; xOffset++) {
+            for (int zOffset = -radius; zOffset <= radius; zOffset++) {
+                maxSurfaceY = Math.max(
+                        maxSurfaceY,
+                        getSanctuaryAccessSurfaceY(world, centerX + xOffset, centerZ + zOffset)
+                );
+            }
+        }
+
+        return maxSurfaceY;
+    }
+
+    private static int getSanctuaryAccessSurfaceY(ServerWorld world, int x, int z) {
+        world.getChunk(Math.floorDiv(x, CHUNK_SIZE), Math.floorDiv(z, CHUNK_SIZE));
+        int surfaceY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+        while (surfaceY > world.getBottomY() + 1
+                && isSanctuarySurfaceVegetation(world.getBlockState(new BlockPos(x, surfaceY - 1, z)))) {
+            surfaceY--;
+        }
+
+        return surfaceY;
+    }
+
+    private static int clearSanctuarySurfaceVegetation(
+            ServerWorld world,
+            int centerX,
+            int centerZ,
+            int clearRadius,
+            int minY
+    ) {
+        int vegetationTopY = getMaxSanctuaryVegetationTopYForArea(world, centerX, centerZ, clearRadius);
+        int startY = Math.max(world.getBottomY(), minY);
+        int endY = Math.min(world.getTopYInclusive(), vegetationTopY + SANCTUARY_SURFACE_EXIT_CLEARANCE);
+        int clearedBlocks = 0;
+
+        for (int y = startY; y <= endY; y++) {
+            for (int xOffset = -clearRadius; xOffset <= clearRadius; xOffset++) {
+                for (int zOffset = -clearRadius; zOffset <= clearRadius; zOffset++) {
+                    BlockPos pos = new BlockPos(centerX + xOffset, y, centerZ + zOffset);
+                    if (canClearSanctuarySurfaceExitBlock(world, pos)) {
+                        world.setBlockState(pos, Blocks.AIR.getDefaultState(), REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
+                        clearedBlocks++;
+                    }
+                }
+            }
+        }
+
+        return clearedBlocks;
+    }
+
+    private static int clearSanctuarySurfaceExit(ServerWorld world, int centerX, int centerZ, int surfaceY, int shaftRadius) {
+        int clearRadius = getSanctuarySurfaceClearRadius(shaftRadius);
+        int minY = Math.max(world.getBottomY(), surfaceY - SANCTUARY_SURFACE_VEGETATION_CLEAR_DEPTH);
+        int vegetationTopY = getMaxSanctuaryVegetationTopYForArea(world, centerX, centerZ, clearRadius);
+        int maxY = Math.min(
+                world.getTopYInclusive(),
+                Math.max(
+                        surfaceY + SANCTUARY_SURFACE_EXIT_CLEARANCE,
+                        vegetationTopY + SANCTUARY_SURFACE_EXIT_CLEARANCE
+                )
+        );
+        int clearedBlocks = 0;
+
+        for (int y = minY; y <= maxY; y++) {
+            for (int xOffset = -clearRadius; xOffset <= clearRadius; xOffset++) {
+                for (int zOffset = -clearRadius; zOffset <= clearRadius; zOffset++) {
+                    BlockPos pos = new BlockPos(centerX + xOffset, y, centerZ + zOffset);
+                    if (canClearSanctuarySurfaceExitBlock(world, pos)) {
+                        world.setBlockState(pos, Blocks.AIR.getDefaultState(), REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
+                        clearedBlocks++;
+                    }
+                }
+            }
+        }
+
+        return clearedBlocks;
+    }
+
+    private static int getMaxSanctuaryVegetationTopYForArea(ServerWorld world, int centerX, int centerZ, int radius) {
+        int maxY = world.getBottomY();
+        for (int xOffset = -radius; xOffset <= radius; xOffset++) {
+            for (int zOffset = -radius; zOffset <= radius; zOffset++) {
+                int x = centerX + xOffset;
+                int z = centerZ + zOffset;
+                world.getChunk(Math.floorDiv(x, CHUNK_SIZE), Math.floorDiv(z, CHUNK_SIZE));
+                maxY = Math.max(maxY, world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z));
+            }
+        }
+
+        return maxY;
+    }
+
+    private static int getSanctuarySurfaceClearRadius(int shaftRadius) {
+        return Math.max(shaftRadius + 1, SANCTUARY_SURFACE_VEGETATION_CLEAR_RADIUS);
+    }
+
+    private static boolean canClearSanctuarySurfaceExitBlock(ServerWorld world, BlockPos pos) {
+        if (world.getBlockEntity(pos) != null) {
+            return false;
+        }
+
+        BlockState state = world.getBlockState(pos);
+        return isSanctuarySurfaceVegetation(state);
+    }
+
+    private static boolean isSanctuarySurfaceVegetation(BlockState state) {
+        return state.isIn(BlockTags.LOGS)
+                || state.isIn(BlockTags.LEAVES)
+                || state.isIn(BlockTags.FLOWERS)
+                || state.isOf(Blocks.TALL_GRASS)
+                || state.isOf(Blocks.SHORT_GRASS)
+                || state.isOf(Blocks.FERN)
+                || state.isOf(Blocks.LARGE_FERN)
+                || state.isOf(Blocks.VINE)
+                || state.isOf(Blocks.LEAF_LITTER)
+                || state.isOf(Blocks.SNOW);
+    }
+
+    private static boolean isSanctuaryWaterAccessBlock(BlockState state) {
+        return state.isOf(Blocks.WATER) || state.isOf(Blocks.BUBBLE_COLUMN);
+    }
+
+    private static long squaredDistance2d(int firstX, int firstZ, int secondX, int secondZ) {
+        long xDistance = secondX - firstX;
+        long zDistance = secondZ - firstZ;
+        return xDistance * xDistance + zDistance * zDistance;
+    }
+
     private static ObstructionEvaluation evaluateObstruction(
             ServerWorld world,
             BreachedStructureDefinition definition,
@@ -4858,6 +5653,11 @@ public final class BreachedStructurePlacementManager {
                 continue;
             }
 
+            if (isSanctuaryStructure(definition.get())
+                    && isInsideSanctuaryAccessProtection(serverWorld, placement.getValue(), pos, SANCTUARY_ACCESS_PROTECTION_MARGIN)) {
+                return true;
+            }
+
             if (BreachedStructureSpawnManager.isInsideProtectionRadius(
                     definition.get(),
                     placement.getValue().centerX(),
@@ -4891,7 +5691,8 @@ public final class BreachedStructurePlacementManager {
             }
 
             if (isCuboidLandlockExclusion(definition.get(), placement.getValue(), pos)
-                    || isRadiusLandlockExclusion(definition.get(), placement.getValue(), pos)) {
+                    || isRadiusLandlockExclusion(definition.get(), placement.getValue(), pos)
+                    || isSanctuaryAccessLandlockExclusion(serverWorld, definition.get(), placement.getValue(), pos)) {
                 return true;
             }
         }
@@ -4925,6 +5726,11 @@ public final class BreachedStructurePlacementManager {
                     return true;
                 }
                 continue;
+            }
+
+            if (isSanctuaryStructure(definition.get())
+                    && isInsideSanctuaryAccessProtection(serverWorld, placement.getValue(), pos, SANCTUARY_ACCESS_PROTECTION_MARGIN)) {
+                return true;
             }
 
             if (BreachedStructureSpawnManager.isInsideProtectionRadius(
@@ -4967,6 +5773,21 @@ public final class BreachedStructurePlacementManager {
         long yDistance = pos.getY() - getProtectedCenterY(placement, pos);
         long zDistance = pos.getZ() - placement.centerZ();
         return xDistance * xDistance + yDistance * yDistance + zDistance * zDistance <= (long) expandedRadius * expandedRadius;
+    }
+
+    private static boolean isSanctuaryAccessLandlockExclusion(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        return isSanctuaryStructure(definition)
+                && isInsideSanctuaryAccessProtection(
+                        world,
+                        placement,
+                        pos,
+                        SANCTUARY_ACCESS_PROTECTION_MARGIN + MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN
+                );
     }
 
     private static boolean isExactProtectedStructure(BreachedStructureDefinition definition) {
@@ -5029,6 +5850,42 @@ public final class BreachedStructurePlacementManager {
                 && pos.getY() < placement.originY() + placement.sizeY() + expandedMargin
                 && pos.getZ() >= placement.originZ() - expandedMargin
                 && pos.getZ() < placement.originZ() + placement.sizeZ() + expandedMargin;
+    }
+
+    private static boolean isInsideSanctuaryAccessProtection(
+            ServerWorld world,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos,
+            int margin
+    ) {
+        if (placement.sizeX() <= 0 || placement.sizeY() <= 0 || placement.sizeZ() <= 0) {
+            return false;
+        }
+
+        int expandedMargin = Math.max(0, margin);
+        if (pos.getX() < placement.originX() - expandedMargin
+                || pos.getX() >= placement.originX() + placement.sizeX() + expandedMargin
+                || pos.getZ() < placement.originZ() - expandedMargin
+                || pos.getZ() >= placement.originZ() + placement.sizeZ() + expandedMargin) {
+            return false;
+        }
+
+        int minY = Math.max(world.getBottomY(), placement.originY() - expandedMargin);
+        int maxY = Math.min(
+                world.getTopYInclusive(),
+                getSanctuaryAccessProtectionTopY(world, pos.getX(), pos.getZ()) + expandedMargin
+        );
+        return pos.getY() >= minY && pos.getY() <= maxY;
+    }
+
+    private static int getSanctuaryAccessProtectionTopY(ServerWorld world, int x, int z) {
+        int surfaceY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
+        while (surfaceY > world.getBottomY() + 1
+                && isSanctuarySurfaceVegetation(world.getBlockState(new BlockPos(x, surfaceY - 1, z)))) {
+            surfaceY--;
+        }
+
+        return Math.min(world.getTopYInclusive(), surfaceY + SANCTUARY_ACCESS_PROTECTION_SURFACE_PADDING);
     }
 
     private static int getProtectedCenterY(BreachedStructurePlacementState.SavedPlacement placement, BlockPos pos) {
@@ -5194,6 +6051,16 @@ public final class BreachedStructurePlacementManager {
     }
 
     public record BreachedMapMarker(String label, int x, int z, int color) {
+    }
+
+    private record StructureOriginBounds(int minX, int maxX, int minZ, int maxZ) {
+        private boolean valid() {
+            return minX <= maxX && minZ <= maxZ;
+        }
+
+        private boolean contains(int x, int z) {
+            return x >= minX && x <= maxX && z >= minZ && z <= maxZ;
+        }
     }
 
     private record PendingStructurePlacement(

@@ -188,7 +188,7 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Lockdown",
-                                    "If no authorized player for a Landlock is online, the claim enters Lockdown. Enemy Breachers spend double durability: normal blocks cost 8, wood costs 32, iron costs 128, diamond costs 512, and netherite costs 1024."
+                                    "If no authorized player for a Landlock has been online for 10 minutes, the claim enters Lockdown. Enemy Breachers spend double durability: normal blocks cost 8, wood costs 32, iron costs 128, diamond costs 512, and netherite costs 1024."
                             ),
                             new ArchiveSection(
                                     "Failed Breaches",

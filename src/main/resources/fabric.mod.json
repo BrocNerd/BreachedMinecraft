@@ -3,11 +3,15 @@
   "id": "breached",
   "version": "${version}",
   "name": "Breached",
-  "description": "",
-  "authors": [],
-  "contact": {},
+  "description": "A Rust-inspired competitive survival, PvP, raiding, and base-building mod.",
+  "authors": [
+    "Broc Nerdin (3rdNerd)"
+  ],
+  "contact": {
+    "email": "brocnerdin@gmail.com"
+  },
   "license": "All-Rights-Reserved",
-  "icon": "assets/breached/icon.png",
+  "icon": "assets/breached/textures/item/netherite_breacher.png",
   "environment": "*",
   "entrypoints": {
     "fabric-datagen": [

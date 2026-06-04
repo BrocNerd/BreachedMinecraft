@@ -149,6 +149,7 @@ public final class BreachedConfig {
         settings.put("breached:pinktree", new StructureSettings(96, null, null));
         settings.put("breached:bigboat", new StructureSettings(96, null, null));
         settings.put("breached:eyeball", new StructureSettings(64, null, null));
+        settings.put("breached:sanctuary", new StructureSettings(128, null, null));
         settings.put("breached:death", new StructureSettings(null, null, null));
         settings.put("breached:cavehut", new StructureSettings(null, null, null));
         settings.put("breached:minorcave1", new StructureSettings(null, null, null));

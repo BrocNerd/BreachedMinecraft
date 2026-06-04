@@ -21,6 +21,7 @@ import net.minecraft.util.collection.DefaultedList;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import nrd.breached.Breached;
+import nrd.breached.landlock.LandlockClaimManager;
 import nrd.breached.reinforcement.ReinforcementManager;
 import nrd.breached.reinforcement.ReinforcementTier;
 import nrd.breached.screen.LandlockScreenHandler;
@@ -34,6 +35,7 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
     private static final int REAL_TIME_DAY_TICKS = 20 * 60 * 60 * 24;
     private static final int UPKEEP_TICK_INTERVAL = 20;
     private static final int UPKEEP_PROGRESS_SAVE_INTERVAL_TICKS = 20 * 60;
+    private static final int AUTHORIZED_ONLINE_SAVE_INTERVAL_TICKS = 20 * 30;
     private static final int CLAIM_COST_RECALC_INTERVAL_TICKS = 20 * 60 * 5;
     private static final String OWNER_UUID_KEY = "owner_uuid";
     private static final String OWNER_NAME_KEY = "owner_name";
@@ -47,6 +49,7 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
     private static final String CACHED_CLAIM_COST_KEY = "cached_claim_cost";
     private static final String LAST_CLAIM_COST_SCAN_TIME_KEY = "last_claim_cost_scan_time";
     private static final String LAST_UPKEEP_TICK_KEY = "last_upkeep_tick";
+    private static final String LAST_AUTHORIZED_ONLINE_TIME_KEY = "last_authorized_online_time";
 
     private UUID ownerUuid;
     private String ownerName;
@@ -59,6 +62,7 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
     private int cachedClaimCost;
     private long lastClaimCostScanTime = Long.MIN_VALUE;
     private long lastUpkeepTick = Long.MIN_VALUE;
+    private long lastAuthorizedOnlineTime = Long.MIN_VALUE;
     private final PropertyDelegate upkeepProperties = new PropertyDelegate() {
         @Override
         public int get(int index) {
@@ -91,6 +95,7 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
             return;
         }
 
+        LandlockClaimManager.refreshLockdownPresence(world, landlock);
         landlock.tickUpkeep(world);
     }
 
@@ -138,12 +143,14 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
         ownerUuid = owner.getUuid();
         ownerName = owner.getGameProfile().name();
         authorizedPlayers.add(ownerUuid);
+        markAuthorizedPlayerOnlineNow();
         markDirty();
     }
 
     public void setOwnerUuid(UUID ownerUuid) {
         this.ownerUuid = ownerUuid;
         authorizedPlayers.add(ownerUuid);
+        markAuthorizedPlayerOnlineNow();
         markDirty();
     }
 
@@ -164,8 +171,10 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
     }
 
     public void addAuthorizedPlayer(UUID playerUuid) {
-        authorizedPlayers.add(playerUuid);
-        markDirty();
+        if (authorizedPlayers.add(playerUuid)) {
+            markAuthorizedPlayerOnlineNow();
+            markDirty();
+        }
     }
 
     public boolean removeAuthorizedPlayer(UUID playerUuid) {
@@ -175,6 +184,7 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
 
         boolean removed = authorizedPlayers.remove(playerUuid);
         if (removed) {
+            markAuthorizedPlayerOnlineNow();
             markDirty();
         }
 
@@ -197,6 +207,21 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
 
     public boolean isDecayed() {
         return decayed;
+    }
+
+    public void markAuthorizedPlayerOnline(long worldTime) {
+        if (lastAuthorizedOnlineTime == Long.MIN_VALUE
+                || lastAuthorizedOnlineTime > worldTime
+                || worldTime - lastAuthorizedOnlineTime >= AUTHORIZED_ONLINE_SAVE_INTERVAL_TICKS) {
+            lastAuthorizedOnlineTime = worldTime;
+            markDirty();
+        }
+    }
+
+    public boolean hasLockdownDelayElapsed(long worldTime, long delayTicks) {
+        return lastAuthorizedOnlineTime == Long.MIN_VALUE
+                || lastAuthorizedOnlineTime > worldTime
+                || worldTime - lastAuthorizedOnlineTime >= delayTicks;
     }
 
     public int getCachedClaimCost() {
@@ -389,6 +414,12 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
         return true;
     }
 
+    private void markAuthorizedPlayerOnlineNow() {
+        if (world != null) {
+            lastAuthorizedOnlineTime = world.getTime();
+        }
+    }
+
     @Override
     public Text getDisplayName() {
         if (ownerName == null || ownerName.isBlank()) {
@@ -497,6 +528,7 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
         cachedClaimCost = Math.max(0, view.getInt(CACHED_CLAIM_COST_KEY, 0));
         lastClaimCostScanTime = view.getLong(LAST_CLAIM_COST_SCAN_TIME_KEY, Long.MIN_VALUE);
         lastUpkeepTick = view.getLong(LAST_UPKEEP_TICK_KEY, Long.MIN_VALUE);
+        lastAuthorizedOnlineTime = view.getLong(LAST_AUTHORIZED_ONLINE_TIME_KEY, Long.MIN_VALUE);
     }
 
     @Override
@@ -524,6 +556,7 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
         view.putInt(CACHED_CLAIM_COST_KEY, cachedClaimCost);
         view.putLong(LAST_CLAIM_COST_SCAN_TIME_KEY, lastClaimCostScanTime);
         view.putLong(LAST_UPKEEP_TICK_KEY, lastUpkeepTick);
+        view.putLong(LAST_AUTHORIZED_ONLINE_TIME_KEY, lastAuthorizedOnlineTime);
     }
 
     private static UUID parseUuid(String value) {
