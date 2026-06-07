@@ -66,7 +66,7 @@ public class BreachedArchiveScreen extends Screen {
                     List.of(
                             new ArchiveSection(
                                     "Landlock Blocks",
-                                    "Drop a Landlock Block near the heart of your base to claim a 17x17x17 cube. You are authorized automatically when you place it. Authorized players can right-click the Landlock Block to manage it. Other players can sneak-right-click it to authorize themselves, and authorized players can sneak-right-click it again to leave. All authorized players can build, break, and manage the claimed area. Only Landlock owners can break a landlock block without a breacher.\n" +
+                                    "Drop a Landlock Block near the heart of your base to claim a 17x17x17 cube. You are authorized automatically when you place it. Authorized players can right-click the Landlock Block to manage it. Other players can sneak-right-click it to authorize themselves, and authorized players can sneak-right-click it again to leave. Authorized players can break and manage the claimed area, but placing blocks inside the claim requires a Reinforcer in your offhand. Only Landlock owners can break a landlock block without a breacher.\n" +
                                             "\n" +
                                             "Unauthorized players cannot break or place blocks inside the claim without a breacher, but they can still open any chests or furnaces. If they can get inside, they will take your stuff!",
                                     List.of(recipe(
@@ -106,7 +106,7 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Reinforcing Land",
-                                    "Claims stop casual griefing, but you'll need reinforcements to defend your base against a breacher! Hold a Reinforcer in your main hand and material in your offhand, then right-click authorized blocks. Wood costs 16 logs, iron costs 4 iron blocks, diamond costs 2 diamond blocks, and netherite costs 1 netherite ingot.",
+                                    "Claims stop casual griefing, but you'll need reinforcements to defend your base against a breacher! Hold a Reinforcer in your main hand and material in your offhand, then right-click authorized blocks. Wood costs 8 logs, iron costs 2 iron blocks, diamond costs 1 diamond block, and netherite costs 1 netherite ingot.",
                                     List.of(recipe(
                                             "reinforcer",
                                             "Reinforcer",
@@ -234,7 +234,7 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Tier 3",
-                                    "The Netherite Crafting Table is late-game power. Build it with six netherite ingots, then use it to craft the strongest progression recipes, including anvils.",
+                                    "The Netherite Crafting Table is late-game power. Build it with six netherite ingots, then use it to craft the strongest progression recipes, including anvils and firework rockets with netherite scrap.",
                                     List.of(recipe(
                                             "tier_3_crafting_bench",
                                             "Netherite Crafting Table",
@@ -286,7 +286,7 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Teams",
-                                    "Teams help friends coordinate and identify each other. Join a team and you'll be able to see your teammates on the locator bar."
+                                    "Teams help friends coordinate and identify each other. Join a team to see your teammates on the locator bar, show a colored team tag by nametags and in tab, and use /tc to send a team-only chat message."
                             ),
                             new ArchiveSection(
                                     "Combat Logging",

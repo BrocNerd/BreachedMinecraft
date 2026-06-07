@@ -12,6 +12,9 @@ import java.util.Optional;
 import java.util.Set;
 
 public final class BreachedStructureDefinitions {
+    private static final int SMALL_MAJOR_PREFERRED_SPACING = 180;
+    private static final int SMALL_MAJOR_MINIMUM_SPACING = 96;
+
     public static final BreachedStructureDefinition SWORD_STATUE = new BreachedStructureDefinition(
             "swordstatue.nbt",
             Identifier.of(Breached.MOD_ID, "swordstatue"),
@@ -1260,6 +1263,34 @@ public final class BreachedStructureDefinitions {
             BreachedStructureDefinition definition,
             Optional<BreachedDimensionRules.BreachedPreset> preset
     ) {
+        if (isSmallIslandPreset(preset) && definition.structureId().equals(HORACE.structureId())) {
+            return definition.withRadiusAndSpacing(96, 300, SMALL_MAJOR_PREFERRED_SPACING, SMALL_MAJOR_MINIMUM_SPACING);
+        }
+
+        if (isSmallIslandPreset(preset) && definition.structureId().equals(PINK_TREE.structureId())) {
+            return definition.withRadiusAndSpacing(96, 300, SMALL_MAJOR_PREFERRED_SPACING, SMALL_MAJOR_MINIMUM_SPACING);
+        }
+
+        if (isSmallIslandPreset(preset) && definition.structureId().equals(SWORD_STATUE.structureId())) {
+            return definition.withRadiusAndSpacing(96, 300, SMALL_MAJOR_PREFERRED_SPACING, SMALL_MAJOR_MINIMUM_SPACING);
+        }
+
+        if (isSmallIslandPreset(preset) && definition.structureId().equals(OFFICIAL_NETHER_PORTAL.structureId())) {
+            return definition.withRadiusAndSpacing(120, 280, SMALL_MAJOR_PREFERRED_SPACING, SMALL_MAJOR_MINIMUM_SPACING);
+        }
+
+        if (isSmallIslandPreset(preset) && definition.structureId().equals(BIG_BOAT.structureId())) {
+            return definition.withRadiusAndSpacing(96, 300, SMALL_MAJOR_PREFERRED_SPACING, SMALL_MAJOR_MINIMUM_SPACING);
+        }
+
+        if (isSmallIslandPreset(preset) && definition.structureId().equals(EYEBALL.structureId())) {
+            return definition.withSpacing(SMALL_MAJOR_PREFERRED_SPACING, SMALL_MAJOR_MINIMUM_SPACING);
+        }
+
+        if (isSmallIslandPreset(preset) && definition.structureId().equals(SANCTUARY.structureId())) {
+            return definition.withRadiusAndSpacing(120, 340, SMALL_MAJOR_PREFERRED_SPACING, SMALL_MAJOR_MINIMUM_SPACING);
+        }
+
         if (isRegularIslandPreset(preset) && definition.structureId().equals(HORACE.structureId())) {
             return definition.withRadius(150, 425);
         }
@@ -1293,6 +1324,10 @@ public final class BreachedStructureDefinitions {
         }
 
         return definition;
+    }
+
+    private static boolean isSmallIslandPreset(Optional<BreachedDimensionRules.BreachedPreset> preset) {
+        return preset.isPresent() && preset.get() == BreachedDimensionRules.BreachedPreset.SMALL;
     }
 
     private static boolean isRegularIslandPreset(Optional<BreachedDimensionRules.BreachedPreset> preset) {

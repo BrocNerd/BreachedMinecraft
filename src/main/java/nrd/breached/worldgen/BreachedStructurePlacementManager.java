@@ -97,6 +97,7 @@ public final class BreachedStructurePlacementManager {
     private static final int SANCTUARY_TARGET_ORIGIN_Y = -48;
     private static final int SANCTUARY_MIN_SURFACE_CLEARANCE = 24;
     private static final int SANCTUARY_BORDER_MARGIN_BLOCKS = 16;
+    private static final int PLANNED_STRUCTURE_BORDER_MARGIN_BLOCKS = 8;
     private static final int SANCTUARY_VOLUME_SAMPLE_STEP = 6;
     private static final int SANCTUARY_FALL_SHAFT_RADIUS = 1;
     private static final int SANCTUARY_CORNER_COLUMN_SEARCH_MARGIN = 16;
@@ -3029,12 +3030,7 @@ public final class BreachedStructurePlacementManager {
             return borderSize;
         }
 
-        Optional<BreachedDimensionRules.BreachedPreset> preset = BreachedDimensionRules.getBreachedPreset(world.getServer());
-        if (preset.isPresent() && preset.get() == BreachedDimensionRules.BreachedPreset.REGULAR) {
-            return 1000.0D;
-        }
-
-        return 2500.0D;
+        return BreachedDimensionRules.getBreachedOverworldBorderSize(world.getServer()).orElse(2500.0D);
     }
 
     private static int clampStructureOrigin(int value, int min, int max) {
@@ -3102,14 +3098,14 @@ public final class BreachedStructurePlacementManager {
             ));
         }
 
-        return swordCandidates;
+        return constrainCandidatesToWorldBorder(world, definition, swordCandidates);
     }
 
     private static List<BreachedStructureSpawnManager.RadiusCandidate> generateRadiusCandidates(
             ServerWorld world,
             BreachedStructureDefinition definition
     ) {
-        return BreachedStructureSpawnManager.generateRadiusCandidates(
+        List<BreachedStructureSpawnManager.RadiusCandidate> candidates = BreachedStructureSpawnManager.generateRadiusCandidates(
                 world.getSeed(),
                 definition.seedSalt(),
                 definition.centerX(),
@@ -3118,6 +3114,64 @@ public final class BreachedStructurePlacementManager {
                 definition.maxRadius(),
                 Math.max(definition.countPerWorld(), definition.plannedCandidateCount()),
                 definition.roughlyOpposed()
+        );
+        return constrainCandidatesToWorldBorder(world, definition, candidates);
+    }
+
+    private static List<BreachedStructureSpawnManager.RadiusCandidate> constrainCandidatesToWorldBorder(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            List<BreachedStructureSpawnManager.RadiusCandidate> candidates
+    ) {
+        if (candidates.isEmpty()) {
+            return candidates;
+        }
+
+        Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, definition);
+        if (template.isEmpty()) {
+            return candidates;
+        }
+
+        Vec3i footprintSize = BreachedStructureSpawnManager.getRotatedSize(template.get().getSize(), definition.rotation());
+        StructureOriginBounds bounds = getBorderContainedOriginBounds(
+                world,
+                Math.max(1, footprintSize.getX()),
+                Math.max(1, footprintSize.getZ()),
+                PLANNED_STRUCTURE_BORDER_MARGIN_BLOCKS
+        );
+        if (!bounds.valid()) {
+            return candidates;
+        }
+
+        List<BreachedStructureSpawnManager.RadiusCandidate> constrainedCandidates = new ArrayList<>(candidates.size());
+        for (BreachedStructureSpawnManager.RadiusCandidate candidate : candidates) {
+            constrainedCandidates.add(constrainCandidateToWorldBorder(definition, candidate, bounds));
+        }
+
+        return constrainedCandidates;
+    }
+
+    private static BreachedStructureSpawnManager.RadiusCandidate constrainCandidateToWorldBorder(
+            BreachedStructureDefinition definition,
+            BreachedStructureSpawnManager.RadiusCandidate candidate,
+            StructureOriginBounds bounds
+    ) {
+        int originX = getPlacementOriginX(definition, candidate);
+        int originZ = getPlacementOriginZ(definition, candidate);
+        int clampedOriginX = clampStructureOrigin(originX, bounds.minX(), bounds.maxX());
+        int clampedOriginZ = clampStructureOrigin(originZ, bounds.minZ(), bounds.maxZ());
+        if (clampedOriginX == originX && clampedOriginZ == originZ) {
+            return candidate;
+        }
+
+        int x = clampedOriginX - definition.placementOffsetX();
+        int z = clampedOriginZ - definition.placementOffsetZ();
+        return new BreachedStructureSpawnManager.RadiusCandidate(
+                candidate.index(),
+                x,
+                z,
+                distanceFromDefinitionCenter(definition, x, z),
+                Math.atan2(z - definition.centerZ(), x - definition.centerX())
         );
     }
 
@@ -3134,7 +3188,7 @@ public final class BreachedStructurePlacementManager {
                 )
         );
 
-        return BreachedStructureSpawnManager.generateRadiusCandidates(
+        List<BreachedStructureSpawnManager.RadiusCandidate> candidates = BreachedStructureSpawnManager.generateRadiusCandidates(
                 world.getSeed(),
                 definition.seedSalt(),
                 definition.centerX(),
@@ -3144,6 +3198,7 @@ public final class BreachedStructurePlacementManager {
                 expandedCandidateCount,
                 definition.roughlyOpposed()
         );
+        return constrainCandidatesToWorldBorder(world, definition, candidates);
     }
 
     private static Optional<BreachedStructureSpawnManager.RadiusCandidate> getReservedCandidate(
@@ -4187,6 +4242,9 @@ public final class BreachedStructurePlacementManager {
         if (structureKey.equals(EYEBALL_STRUCTURE_KEY)) {
             return Optional.of(Text.literal("Eyeball has been restocked").formatted(Formatting.DARK_RED));
         }
+        if (structureKey.equals(SANCTUARY_STRUCTURE_KEY)) {
+            return Optional.of(Text.literal("Sanctuary has been restocked").formatted(Formatting.DARK_GREEN));
+        }
 
         return Optional.of(Text.literal("Major structure loot has been restocked"));
     }
@@ -4610,7 +4668,7 @@ public final class BreachedStructurePlacementManager {
     private static int getMinorPoiBudget(ServerWorld world) {
         BreachedConfig.MinorPoiSettings minorPoiConfig = BreachedConfig.get().minorPoi;
         Optional<BreachedDimensionRules.BreachedPreset> preset = BreachedDimensionRules.getBreachedPreset(world.getServer());
-        if (preset.isPresent() && preset.get() == BreachedDimensionRules.BreachedPreset.REGULAR) {
+        if (preset.isPresent() && preset.get() != BreachedDimensionRules.BreachedPreset.LARGE) {
             return minorPoiConfig.smallWorldBudget;
         }
 

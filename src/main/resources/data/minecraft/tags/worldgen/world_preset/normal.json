@@ -1,6 +1,7 @@
 {
   "replace": true,
   "values": [
+    "breached:small_breached_island",
     "breached:breached_island",
     "breached:large_breached_island"
   ]

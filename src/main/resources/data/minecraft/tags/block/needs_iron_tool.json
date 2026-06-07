@@ -1,0 +1,8 @@
+{
+  "replace": false,
+  "values": [
+    "breached:tier_1_crafting_bench",
+    "breached:tier_2_crafting_bench",
+    "breached:tier_3_crafting_bench"
+  ]
+}

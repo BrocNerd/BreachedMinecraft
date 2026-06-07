@@ -63,11 +63,18 @@ public final class TeamCommands {
                                         .executes(TeamCommands::joinTeam)))
                         .then(literal("leave")
                                 .executes(TeamCommands::leaveTeam))
+                        .then(literal("chat")
+                                .then(argument("message", StringArgumentType.greedyString())
+                                        .executes(TeamCommands::sendTeamChat)))
                         .then(literal("info")
                                 .executes(TeamCommands::showTeamInfo))
                         .then(literal("list")
                                 .executes(TeamCommands::listTeams))
                 )
+        );
+        dispatcher.register(literal("tc")
+                .then(argument("message", StringArgumentType.greedyString())
+                        .executes(TeamCommands::sendTeamChat))
         );
     }
 
@@ -93,6 +100,7 @@ public final class TeamCommands {
 
         TeamData team = state.createTeam(teamName, player.getUuid(), player.getGameProfile().name());
         TeamLocatorBar.refresh(context.getSource().getServer());
+        TeamScoreboardSync.sync(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Created team " + team.getName() + "."), false);
         return 1;
     }
@@ -115,6 +123,7 @@ public final class TeamCommands {
         String teamName = team.getName();
         state.disbandTeam(team);
         TeamLocatorBar.refresh(context.getSource().getServer());
+        TeamScoreboardSync.sync(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Disbanded team " + teamName + "."), false);
         return 1;
     }
@@ -181,6 +190,7 @@ public final class TeamCommands {
 
         state.removeMember(team, kickedPlayerId);
         TeamLocatorBar.refresh(context.getSource().getServer());
+        TeamScoreboardSync.sync(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Kicked " + kickedPlayer.getGameProfile().name() + " from " + team.getName() + "."), false);
         kickedPlayer.sendMessage(Text.literal("You were kicked from " + team.getName() + "."));
         return 1;
@@ -214,6 +224,7 @@ public final class TeamCommands {
         }
 
         state.transferOwnership(team, newOwnerId, newOwner.getGameProfile().name());
+        TeamScoreboardSync.sync(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Transferred ownership of " + team.getName() + " to " + newOwner.getGameProfile().name() + "."), false);
         newOwner.sendMessage(Text.literal("You are now the owner of " + team.getName() + "."));
         return 1;
@@ -242,6 +253,7 @@ public final class TeamCommands {
         }
 
         state.setDisplayColor(team, color);
+        TeamScoreboardSync.sync(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Set team color to ")
                 .append(Text.literal(color.getName()).formatted(color))
                 .append(Text.literal(".")), false);
@@ -271,6 +283,7 @@ public final class TeamCommands {
 
         state.addMember(team, player.getUuid(), player.getGameProfile().name());
         TeamLocatorBar.refresh(context.getSource().getServer());
+        TeamScoreboardSync.sync(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Joined team " + team.getName() + "."), false);
         return 1;
     }
@@ -292,8 +305,39 @@ public final class TeamCommands {
 
         state.removeMember(team, player.getUuid());
         TeamLocatorBar.refresh(context.getSource().getServer());
+        TeamScoreboardSync.sync(context.getSource().getServer());
         context.getSource().sendFeedback(() -> Text.literal("Left team " + team.getName() + "."), false);
         return 1;
+    }
+
+    private static int sendTeamChat(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {
+        ServerPlayerEntity sender = context.getSource().getPlayerOrThrow();
+        TeamState state = TeamState.get(context.getSource().getServer());
+        TeamData team = state.getPlayerTeam(sender.getUuid()).orElse(null);
+
+        if (team == null) {
+            context.getSource().sendError(Text.literal("You are not in a team."));
+            return 0;
+        }
+
+        String message = StringArgumentType.getString(context, "message").trim();
+        if (message.isEmpty()) {
+            context.getSource().sendError(Text.literal("Team chat message cannot be empty."));
+            return 0;
+        }
+
+        Text teamMessage = Text.literal("[Team] ").formatted(team.getDisplayColor())
+                .append(Text.literal(sender.getGameProfile().name() + ": ").formatted(Formatting.WHITE))
+                .append(Text.literal(message).formatted(Formatting.GRAY));
+        int recipients = 0;
+        for (ServerPlayerEntity teammate : context.getSource().getServer().getPlayerManager().getPlayerList()) {
+            if (team.hasMember(teammate.getUuid())) {
+                teammate.sendMessage(teamMessage, false);
+                recipients++;
+            }
+        }
+
+        return recipients;
     }
 
     private static int showTeamInfo(CommandContext<ServerCommandSource> context) throws CommandSyntaxException {

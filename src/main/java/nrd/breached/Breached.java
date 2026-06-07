@@ -78,6 +78,7 @@ import nrd.breached.respawn.RespawnCooldownManager;
 import nrd.breached.screen.LandlockScreenHandler;
 import nrd.breached.team.TeamCommands;
 import nrd.breached.team.TeamData;
+import nrd.breached.team.TeamScoreboardSync;
 import nrd.breached.team.TeamState;
 import nrd.breached.worldgen.BreachedDimensionRules;
 import nrd.breached.worldgen.BreachedStructurePlacementManager;
@@ -238,6 +239,7 @@ public class Breached implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(RequestTownhallRespawnPayload.ID, RequestTownhallRespawnPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(SelectRespawnBedPayload.ID, SelectRespawnBedPayload.CODEC);
         TeamCommands.register();
+        TeamScoreboardSync.register();
         registerLandlockDebugEvents();
         registerLandlockProtectionEvents();
         registerLandlockPlacementProtectionEvents();
@@ -576,7 +578,7 @@ public class Breached implements ModInitializer {
             ItemStack materialStack = player.getOffHandStack();
             java.util.Optional<ReinforcementTier> requestedTier = ReinforcementTier.fromMaterial(materialStack);
             if (requestedTier.isEmpty()) {
-                player.sendMessage(Text.literal("Hold 16 logs, 4 iron blocks, 2 diamond blocks, or 1 netherite ingot in your offhand."), false);
+                player.sendMessage(Text.literal("Hold 8 logs, 2 iron blocks, 1 diamond block, or 1 netherite ingot in your offhand."), false);
                 return ActionResult.SUCCESS;
             }
 
@@ -896,7 +898,14 @@ public class Breached implements ModInitializer {
                 }
             }
 
-            if (LandlockClaimManager.canPlayerModify(world, player, placementContext.getBlockPos())) {
+            BlockPos placementPos = placementContext.getBlockPos();
+            if (LandlockClaimManager.canPlayerModify(world, player, placementPos)) {
+                if (LandlockClaimManager.isInsideAnyClaim(world, placementPos) && !player.getOffHandStack().isOf(REINFORCER)) {
+                    player.sendMessage(Text.literal("Hold a Reinforcer in your offhand to build inside your Landlock claim."), false);
+                    syncRejectedBlockPlacement(player);
+                    return ActionResult.FAIL;
+                }
+
                 return ActionResult.PASS;
             }
 

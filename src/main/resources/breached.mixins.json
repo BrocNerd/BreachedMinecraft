@@ -12,6 +12,7 @@
     "ExplosionBehaviorMixin",
     "ExplosionImplMixin",
     "FireChargeItemMixin",
+    "FireworkRocketRecipeMixin",
     "FlintAndSteelItemMixin",
     "ItemStackMixin",
     "PlayerManagerMixin",

@@ -43,6 +43,7 @@ public final class CraftingTierRules {
                 Items.CHISELED_BOOKSHELF,
                 Items.SMITHING_TABLE,
                 Items.MACE,
+                Items.FIREWORK_ROCKET,
                 Items.ANVIL, Items.CHIPPED_ANVIL, Items.DAMAGED_ANVIL,
                 Items.NETHERITE_SWORD, Items.NETHERITE_SHOVEL, Items.NETHERITE_PICKAXE, Items.NETHERITE_AXE, Items.NETHERITE_HOE,
                 Items.NETHERITE_HELMET, Items.NETHERITE_CHESTPLATE, Items.NETHERITE_LEGGINGS, Items.NETHERITE_BOOTS,

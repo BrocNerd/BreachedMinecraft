@@ -8,9 +8,9 @@ import java.util.Locale;
 import java.util.Optional;
 
 public enum ReinforcementTier {
-    WOOD(0, "Wood", 16, 16),
-    IRON(1, "Iron", 64, 4),
-    DIAMOND(2, "Diamond", 256, 2),
+    WOOD(0, "Wood", 16, 8),
+    IRON(1, "Iron", 64, 2),
+    DIAMOND(2, "Diamond", 256, 1),
     NETHERITE(3, "Netherite", 512, 1);
 
     private final int level;
@@ -56,9 +56,9 @@ public enum ReinforcementTier {
 
     public String materialDescription() {
         return switch (this) {
-            case WOOD -> "16 logs";
-            case IRON -> "4 iron blocks";
-            case DIAMOND -> "2 diamond blocks";
+            case WOOD -> "8 logs";
+            case IRON -> "2 iron blocks";
+            case DIAMOND -> "1 diamond block";
             case NETHERITE -> "1 netherite ingot";
         };
     }

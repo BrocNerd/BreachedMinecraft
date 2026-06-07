@@ -31,6 +31,14 @@ public final class BreachedDimensionRules {
     private static final double BORDER_CENTER = 0.0D;
     private static final int TOWNHALL_INITIAL_SPAWN_X = 0;
     private static final int TOWNHALL_INITIAL_SPAWN_Z = 0;
+    private static final PresetRules SMALL_BREACHED_ISLAND = new PresetRules(
+            BreachedPreset.SMALL,
+            RegistryKey.of(RegistryKeys.WORLD_PRESET, Identifier.of(Breached.MOD_ID, "small_breached_island")),
+            RegistryKey.of(RegistryKeys.CHUNK_GENERATOR_SETTINGS, Identifier.of(Breached.MOD_ID, "small_island_overworld")),
+            "breached:small_breached_island",
+            750.0D,
+            375.0D
+    );
     private static final PresetRules BREACHED_ISLAND = new PresetRules(
             BreachedPreset.REGULAR,
             RegistryKey.of(RegistryKeys.WORLD_PRESET, Identifier.of(Breached.MOD_ID, "breached_island")),
@@ -48,6 +56,7 @@ public final class BreachedDimensionRules {
             1250.0D
     );
     private static final PresetRules[] BREACHED_PRESETS = {
+            SMALL_BREACHED_ISLAND,
             BREACHED_ISLAND,
             LARGE_BREACHED_ISLAND
     };
@@ -125,6 +134,10 @@ public final class BreachedDimensionRules {
         return getPresetRules(server).map(PresetRules::preset);
     }
 
+    public static Optional<Double> getBreachedOverworldBorderSize(MinecraftServer server) {
+        return getPresetRules(server).map(PresetRules::overworldBorderSize);
+    }
+
     private static Optional<PresetRules> getPresetRules(MinecraftServer server) {
         Registry<DimensionOptions> dimensions = server.getCombinedDynamicRegistries()
                 .get(ServerDynamicRegistryType.DIMENSIONS)
@@ -159,6 +172,7 @@ public final class BreachedDimensionRules {
     }
 
     public enum BreachedPreset {
+        SMALL,
         REGULAR,
         LARGE
     }

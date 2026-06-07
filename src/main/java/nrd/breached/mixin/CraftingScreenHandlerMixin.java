@@ -4,6 +4,7 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.inventory.CraftingResultInventory;
 import net.minecraft.inventory.RecipeInputInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.recipe.CraftingRecipe;
 import net.minecraft.recipe.RecipeEntry;
@@ -40,10 +41,33 @@ public class CraftingScreenHandlerMixin {
                 ? tierProvider.breached$getCraftingTier()
                 : CraftingTier.TIER_0;
 
+        if (result.isOf(Items.FIREWORK_ROCKET) && !breached$hasNetheriteScrap(craftingInventory)) {
+            breached$clearCraftingResult(handler, player, resultInventory);
+            return;
+        }
+
         if (CraftingTierRules.canCraft(tableTier, result)) {
             return;
         }
 
+        breached$clearCraftingResult(handler, player, resultInventory);
+    }
+
+    private static boolean breached$hasNetheriteScrap(RecipeInputInventory craftingInventory) {
+        for (int slot = 0; slot < craftingInventory.size(); slot++) {
+            if (craftingInventory.getStack(slot).isOf(Items.NETHERITE_SCRAP)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void breached$clearCraftingResult(
+            ScreenHandler handler,
+            PlayerEntity player,
+            CraftingResultInventory resultInventory
+    ) {
         resultInventory.setStack(0, ItemStack.EMPTY);
         handler.setReceivedStack(0, ItemStack.EMPTY);
 
