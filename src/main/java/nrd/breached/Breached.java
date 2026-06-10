@@ -85,6 +85,7 @@ import nrd.breached.team.TeamScoreboardSync;
 import nrd.breached.team.TeamState;
 import nrd.breached.worldgen.BreachedDimensionRules;
 import nrd.breached.worldgen.BreachedStructurePlacementManager;
+import nrd.breached.worldgen.TownhallTraderManager;
 
 import java.util.HashMap;
 import java.util.Comparator;
@@ -258,6 +259,7 @@ public class Breached implements ModInitializer {
         registerDeathMapMarkers();
         registerVillagerTradingLock();
         BreachedDimensionRules.register();
+        TownhallTraderManager.register();
         AdrenalineManager.register();
         LowYHealthLimitManager.register();
         BreachedMapSnapshotManager.register();
@@ -511,6 +513,10 @@ public class Breached implements ModInitializer {
         // TODO: Revisit village and structure loot table balance after custom POIs are designed.
         UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
             if (world.isClient() || hand != Hand.MAIN_HAND || !(entity instanceof VillagerEntity || entity instanceof WanderingTraderEntity)) {
+                return ActionResult.PASS;
+            }
+
+            if (TownhallTraderManager.isTownhallTrader(entity)) {
                 return ActionResult.PASS;
             }
 

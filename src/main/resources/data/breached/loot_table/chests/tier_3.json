@@ -622,7 +622,18 @@
         {
           "type": "minecraft:item",
           "name": "minecraft:elytra",
-          "weight": 3
+          "weight": 3,
+          "functions": [
+            {
+              "function": "minecraft:set_damage",
+              "damage": {
+                "type": "minecraft:uniform",
+                "min": 0.1,
+                "max": 0.49
+              },
+              "add": false
+            }
+          ]
         },
         {
           "type": "minecraft:item",
