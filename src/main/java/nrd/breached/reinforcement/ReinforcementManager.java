@@ -1,6 +1,7 @@
 package nrd.breached.reinforcement;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -55,7 +56,7 @@ public final class ReinforcementManager {
     }
 
     public static boolean canStoreReinforcement(BlockState state) {
-        return !state.isAir() && !BreacherItem.isBlockedBlock(state);
+        return !state.isAir() && !state.isOf(Blocks.SNOW) && !BreacherItem.isBlockedBlock(state);
     }
 
     public static int getBreacherDurabilityCost(World world, BlockPos pos, BlockState state) {
