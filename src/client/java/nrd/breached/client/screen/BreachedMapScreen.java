@@ -39,8 +39,9 @@ public class BreachedMapScreen extends Screen {
     private static final int TOWNHALL_BUTTON_COLOR = 0xFF1E5E7A;
     private static final int TOWNHALL_BUTTON_HOVER_COLOR = 0xFF27799E;
     private static final int TOWNHALL_BUTTON_BORDER_COLOR = 0xFFC6E8F8;
-    private static final int BED_LIST_HOVER_COLOR = 0x3339FF14;
-    private static final int BED_LIST_ROW_HEIGHT = 11;
+    private static final int DISABLED_RESPAWN_BUTTON_COLOR = 0xFF2B3840;
+    private static final int DISABLED_RESPAWN_BUTTON_BORDER_COLOR = 0xFF5F727C;
+    private static final int BED_LIST_ROW_HEIGHT = TOWNHALL_BUTTON_HEIGHT + 5;
     private static final float PLAYER_LABEL_SCALE = 0.75F;
     private static final float BED_LABEL_SCALE = 0.75F;
     private static final float DEATH_LABEL_SCALE = 0.5F;
@@ -275,29 +276,13 @@ public class BreachedMapScreen extends Screen {
 
         int left = townhallRespawnButtonLeft();
         int top = townhallRespawnButtonTop();
-        boolean hovered = isInsideTownhallRespawnButton(mouseX, mouseY);
-        context.fill(
+        renderRespawnButton(
+                context,
+                "Respawn in Townhall",
                 left,
                 top,
-                left + TOWNHALL_BUTTON_WIDTH,
-                top + TOWNHALL_BUTTON_HEIGHT,
-                hovered ? TOWNHALL_BUTTON_HOVER_COLOR : TOWNHALL_BUTTON_COLOR
-        );
-        context.drawStrokedRectangle(
-                left,
-                top,
-                TOWNHALL_BUTTON_WIDTH,
-                TOWNHALL_BUTTON_HEIGHT,
-                TOWNHALL_BUTTON_BORDER_COLOR
-        );
-
-        Text label = Text.literal("Respawn in Townhall");
-        context.drawTextWithShadow(
-                textRenderer,
-                label,
-                left + (TOWNHALL_BUTTON_WIDTH - textRenderer.getWidth(label)) / 2,
-                top + 6,
-                TEXT_COLOR
+                isInsideTownhallRespawnButton(mouseX, mouseY),
+                true
         );
         renderBedCooldownList(context, left, top + TOWNHALL_BUTTON_HEIGHT + 7, mouseX, mouseY);
     }
@@ -314,19 +299,46 @@ public class BreachedMapScreen extends Screen {
             String cooldownText = remainingTicks <= 0 ? "available" : formatCooldown(remainingTicks);
             int rowTop = top + index * BED_LIST_ROW_HEIGHT;
             boolean bedReady = isBedReady(bed);
-            if (bedReady && isInsideBedListRow(mouseX, mouseY, left, rowTop)) {
-                context.fill(left - 2, rowTop - 1, left + TOWNHALL_BUTTON_WIDTH, rowTop + 10, BED_LIST_HOVER_COLOR);
-            }
-
-            int color = bedReady ? bed.color() : UNAVAILABLE_BED_TEXT_COLOR;
-            context.drawTextWithShadow(
-                    textRenderer,
-                    Text.literal(bed.label() + ": " + cooldownText),
+            String label = bedReady ? "Respawn at " + bed.label() : bed.label() + ": " + cooldownText;
+            renderRespawnButton(
+                    context,
+                    label,
                     left,
                     rowTop,
-                    color
+                    bedReady && isInsideBedListRow(mouseX, mouseY, left, rowTop),
+                    bedReady
             );
         }
+    }
+
+    private void renderRespawnButton(DrawContext context, String label, int left, int top, boolean hovered, boolean active) {
+        int fillColor = active
+                ? (hovered ? TOWNHALL_BUTTON_HOVER_COLOR : TOWNHALL_BUTTON_COLOR)
+                : DISABLED_RESPAWN_BUTTON_COLOR;
+        int borderColor = active ? TOWNHALL_BUTTON_BORDER_COLOR : DISABLED_RESPAWN_BUTTON_BORDER_COLOR;
+        int labelColor = active ? TEXT_COLOR : UNAVAILABLE_BED_TEXT_COLOR;
+        String fittedLabel = textRenderer.trimToWidth(label, TOWNHALL_BUTTON_WIDTH - 12);
+        context.fill(
+                left,
+                top,
+                left + TOWNHALL_BUTTON_WIDTH,
+                top + TOWNHALL_BUTTON_HEIGHT,
+                fillColor
+        );
+        context.drawStrokedRectangle(
+                left,
+                top,
+                TOWNHALL_BUTTON_WIDTH,
+                TOWNHALL_BUTTON_HEIGHT,
+                borderColor
+        );
+        context.drawTextWithShadow(
+                textRenderer,
+                Text.literal(fittedLabel),
+                left + (TOWNHALL_BUTTON_WIDTH - textRenderer.getWidth(fittedLabel)) / 2,
+                top + 6,
+                labelColor
+        );
     }
 
     private static String formatCooldown(int remainingTicks) {
@@ -923,10 +935,10 @@ public class BreachedMapScreen extends Screen {
     }
 
     private static boolean isInsideBedListRow(double mouseX, double mouseY, int left, int rowTop) {
-        return mouseX >= left - 2
+        return mouseX >= left
                 && mouseX < left + TOWNHALL_BUTTON_WIDTH
-                && mouseY >= rowTop - 1
-                && mouseY < rowTop + BED_LIST_ROW_HEIGHT - 1;
+                && mouseY >= rowTop
+                && mouseY < rowTop + TOWNHALL_BUTTON_HEIGHT;
     }
 
     private static int clamp(int value, int min, int max) {

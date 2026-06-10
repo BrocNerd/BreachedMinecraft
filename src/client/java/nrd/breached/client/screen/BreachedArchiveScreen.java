@@ -66,7 +66,7 @@ public class BreachedArchiveScreen extends Screen {
                     List.of(
                             new ArchiveSection(
                                     "Landlock Blocks",
-                                    "Drop a Landlock Block near the heart of your base to claim a 17x17x17 cube. You are authorized automatically when you place it. Authorized players can right-click the Landlock Block to manage it. Other players can sneak-right-click it to authorize themselves, and authorized players can sneak-right-click it again to leave. Authorized players can break and manage the claimed area, but placing blocks inside the claim requires a Reinforcer in your offhand. Only Landlock owners can break a landlock block without a breacher.\n" +
+                                    "Drop a Landlock Block near the heart of your base to claim a 17x17x17 cube. You are authorized automatically when you place it. Authorized players can right-click the Landlock Block to manage it. Other players can sneak-right-click it to authorize themselves, and authorized players can sneak-right-click it again to leave. Authorized players can break and manage the claimed area, but placing blocks inside the claim requires a Reinforcer in your offhand. Only Landlock owners can break a landlock block without a breacher. Snow layers can always be cleared.\n" +
                                             "\n" +
                                             "Unauthorized players cannot break or place blocks inside the claim without a breacher, but they can still open any chests or furnaces. If they can get inside, they will take your stuff!",
                                     List.of(recipe(
@@ -80,7 +80,7 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Claim Limits",
-                                    "You can only be authorized on 3 Landlocks, so pick your bases carefully. Landlocks must be 32 blocks apart, above Y 60, and 12 blocks away from protected major structures."
+                                    "You can only be authorized on 3 Landlocks, so pick your bases carefully. Landlocks must be 32 blocks apart, above Y 60, and 12 blocks away from protected major structures. Storage and automation placed outside an authorized Landlock claim despawn with their contents after 1 hour."
                             ),
                             new ArchiveSection(
                                     "Claim Control",
@@ -106,7 +106,7 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Reinforcing Land",
-                                    "Claims stop casual griefing, but you'll need reinforcements to defend your base against a breacher! Hold a Reinforcer in your main hand and material in your offhand, then right-click authorized blocks. Wood costs 8 logs, iron costs 2 iron blocks, diamond costs 1 diamond block, and netherite costs 1 netherite ingot.",
+                                    "Claims stop casual griefing, but you'll need reinforcements to defend your base against a breacher! Hold a Reinforcer in your main hand and material in your offhand, then right-click authorized blocks. Wood costs 8 logs, copper costs 4 copper blocks, iron costs 2 iron blocks, gold costs 2 gold blocks, diamond costs 1 diamond block, and netherite costs 1 netherite ingot.",
                                     List.of(recipe(
                                             "reinforcer",
                                             "Reinforcer",
@@ -132,7 +132,7 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Reading the Landlock",
-                                    "Size is the upkeep size of your claimed base. Normal blocks add 1 size. Wood, iron, diamond, and netherite reinforced blocks count as 2, 4, 8, and 16. Cost is the daily upkeep cost, rounded up from Size divided by 20. Stored is your banked upkeep. Protected is how long the claim can stay safe with what is stored."
+                                    "Size is the upkeep size of your claimed base. Normal blocks add 1 size. Wood and copper reinforced blocks count as 2, iron and gold count as 4, diamond counts as 8, and netherite counts as 16. Cost is the daily upkeep cost, starting from Size divided by 20 and rising faster for larger claims, up to about 3x the old rate. Stored is your banked upkeep. Protected is how long the claim can stay safe with what is stored."
                             ),
                             new ArchiveSection(
                                     "Decay",
@@ -184,11 +184,11 @@ public class BreachedArchiveScreen extends Screen {
                             ),
                             new ArchiveSection(
                                     "Reinforced Blocks",
-                                    "Reinforcement is what makes walls expensive to break. Wood costs 16 Breacher durability, iron costs 64, diamond costs 256, and netherite costs 512."
+                                    "Reinforcement is what makes walls expensive to break. Wood and copper cost 16 Breacher durability, iron and gold cost 64, diamond costs 256, and netherite costs 512."
                             ),
                             new ArchiveSection(
                                     "Lockdown",
-                                    "If no authorized player for a Landlock has been online for 10 minutes, the claim enters Lockdown. Enemy Breachers spend double durability: normal blocks cost 8, wood costs 32, iron costs 128, diamond costs 512, and netherite costs 1024."
+                                    "If no authorized player for a Landlock has been online for 10 minutes, the claim enters Lockdown. Enemy Breachers spend double durability: normal blocks cost 8, wood and copper cost 32, iron and gold cost 128, diamond costs 512, and netherite costs 1024."
                             ),
                             new ArchiveSection(
                                     "Failed Breaches",
