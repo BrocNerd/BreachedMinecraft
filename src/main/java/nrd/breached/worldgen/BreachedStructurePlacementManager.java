@@ -5764,6 +5764,32 @@ public final class BreachedStructurePlacementManager {
         return false;
     }
 
+    public static boolean isInsideProtectedStructureExplosionArea(World world, BlockPos pos) {
+        if (world.isClient() || !world.getRegistryKey().equals(World.OVERWORLD) || !(world instanceof ServerWorld serverWorld)) {
+            return false;
+        }
+
+        BreachedStructurePlacementState state = BreachedStructurePlacementState.get(serverWorld.getServer());
+        migrateLegacyCentralSpawnState(serverWorld, state);
+
+        for (Map.Entry<String, BreachedStructurePlacementState.SavedPlacement> placement : state.placements()) {
+            if (!placement.getValue().active()) {
+                continue;
+            }
+
+            Optional<BreachedStructureDefinition> definition = getProtectedDefinition(placement.getKey());
+            if (definition.isEmpty()) {
+                continue;
+            }
+
+            if (isProtectedStructureExplosionPosition(serverWorld, definition.get(), placement.getValue(), pos)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static boolean isInsideMajorStructureLandlockExclusion(World world, BlockPos pos) {
         if (world.isClient() || !world.getRegistryKey().equals(World.OVERWORLD) || !(world instanceof ServerWorld serverWorld)) {
             return false;
@@ -5858,6 +5884,87 @@ public final class BreachedStructurePlacementManager {
         return isInsideExpandedPlacementBounds(placement, pos, getProtectedStructureCuboidMargin(definition))
                 || placement.protectedExtensionBlocks().contains(pos)
                 || isRecognizedLegacyExtensionBlock(world, definition, placement, pos);
+    }
+
+    private static boolean isProtectedStructureExplosionPosition(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        if (isProtectedStructurePosition(world, definition, placement, pos)) {
+            return true;
+        }
+
+        if (isInsideProtectedStructureExplosionBuffer(definition, placement, pos)) {
+            return true;
+        }
+
+        return isCenterOnlyProtectedStructureExplosionPosition(world, definition, placement, pos);
+    }
+
+    private static boolean isInsideProtectedStructureExplosionBuffer(
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        if (!hasPlacementFootprint(placement)) {
+            return false;
+        }
+
+        int explosionMargin = MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN
+                + getProtectedStructureCuboidMargin(definition);
+        return isInsideExpandedPlacementBounds(placement, pos, explosionMargin)
+                || isNearProtectedExtensionBlock(placement, pos, MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN);
+    }
+
+    private static boolean isCenterOnlyProtectedStructureExplosionPosition(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        if (hasPlacementFootprint(placement)
+                || world.getBlockState(pos).isAir()
+                || !isInsideCenterOnlyProtectionRadius(definition, placement, pos)) {
+            return false;
+        }
+
+        Optional<PortalEventType> portalEventType = getPortalEventType(definition);
+        if (portalEventType.isPresent()) {
+            BlockState state = world.getBlockState(pos);
+            return isPortalFrameBlock(state)
+                    || state.isOf(Blocks.NETHER_PORTAL)
+                    || state.isOf(Blocks.END_PORTAL)
+                    || state.isOf(Blocks.END_PORTAL_FRAME);
+        }
+
+        return true;
+    }
+
+    private static boolean isInsideCenterOnlyProtectionRadius(
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        int radius = getCenterOnlyExplosionProtectionRadius(definition);
+        long xDistance = pos.getX() - placement.centerX();
+        long zDistance = pos.getZ() - placement.centerZ();
+        return xDistance * xDistance + zDistance * zDistance <= (long) radius * radius;
+    }
+
+    private static int getCenterOnlyExplosionProtectionRadius(BreachedStructureDefinition definition) {
+        Optional<PortalEventType> portalEventType = getPortalEventType(definition);
+        if (portalEventType.isPresent()) {
+            return PORTAL_ACTIVE_CHECK_RADIUS + MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN;
+        }
+
+        String structureKey = BreachedStructureDefinitions.key(definition);
+        if (structureKey.equals(TOWNHALL_STRUCTURE_KEY)) {
+            return 96;
+        }
+
+        return 48;
     }
 
     private static int getProtectedStructureCuboidMargin(BreachedStructureDefinition definition) {

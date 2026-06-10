@@ -24,7 +24,7 @@ public class ExplosionBehaviorMixin {
             CallbackInfoReturnable<Boolean> cir
     ) {
         if (LandlockClaimManager.isInsideAnyClaim(explosion.getWorld(), pos)
-                || BreachedStructurePlacementManager.isInsideProtectedStructure(explosion.getWorld(), pos)) {
+                || BreachedStructurePlacementManager.isInsideProtectedStructureExplosionArea(explosion.getWorld(), pos)) {
             cir.setReturnValue(false);
         }
     }

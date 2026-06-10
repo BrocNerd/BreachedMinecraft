@@ -29,7 +29,7 @@ public abstract class ExplosionImplMixin {
 
         List<BlockPos> filteredBlocks = new ArrayList<>(blocksToDestroy);
         filteredBlocks.removeIf(pos -> LandlockClaimManager.isInsideAnyClaim(world, pos)
-                || BreachedStructurePlacementManager.isInsideProtectedStructure(world, pos));
+                || BreachedStructurePlacementManager.isInsideProtectedStructureExplosionArea(world, pos));
         cir.setReturnValue(filteredBlocks);
     }
 }
