@@ -6,6 +6,7 @@
   "mixins": [
     "AbstractFireBlockMixin",
     "ArmorStandEntityMixin",
+    "BlockItemMixin",
     "BlockBreakingDeltaMixin",
     "CraftingScreenHandlerMixin",
     "EntityMixin",
@@ -15,11 +16,14 @@
     "FireworkRocketRecipeMixin",
     "FlintAndSteelItemMixin",
     "ItemStackMixin",
+    "KillCommandMixin",
+    "MinecartItemMixin",
     "PlayerManagerMixin",
     "PlayerInventoryMixin",
     "ServerPlayerRespawnMixin",
     "ServerWorldSleepStatusMixin",
-    "ServerWaypointHandlerMixin"
+    "ServerWaypointHandlerMixin",
+    "StorageMinecartEntityMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -4,6 +4,7 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.entity.event.v1.EntitySleepEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
@@ -21,6 +22,7 @@ import net.minecraft.block.FenceGateBlock;
 import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityType;
+import net.minecraft.entity.EntityType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.passive.WanderingTraderEntity;
@@ -76,6 +78,7 @@ import nrd.breached.reinforcement.ReinforcementManager;
 import nrd.breached.reinforcement.ReinforcementTier;
 import nrd.breached.respawn.RespawnCooldownManager;
 import nrd.breached.screen.LandlockScreenHandler;
+import nrd.breached.storage.TemporaryStorageManager;
 import nrd.breached.team.TeamCommands;
 import nrd.breached.team.TeamData;
 import nrd.breached.team.TeamScoreboardSync;
@@ -245,6 +248,7 @@ public class Breached implements ModInitializer {
         registerLandlockPlacementProtectionEvents();
         registerLandlockDoorProtectionEvents();
         registerEnderChestRemovalEvents();
+        registerPhantomRemovalEvents();
         registerRespawnEvents();
         InitialTownhallSpawnManager.register();
         registerStarterItemEvents();
@@ -258,6 +262,7 @@ public class Breached implements ModInitializer {
         LowYHealthLimitManager.register();
         BreachedMapSnapshotManager.register();
         BreachNotificationManager.register();
+        TemporaryStorageManager.register();
         registerReinforcementEvents();
         registerReinforcementOutlineSync();
 
@@ -524,6 +529,7 @@ public class Breached implements ModInitializer {
     private static void registerLandlockProtectionEvents() {
         PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) -> {
             if (world.isClient()
+                    || state.isOf(Blocks.SNOW)
                     || LandlockClaimManager.canPlayerModify(world, player, pos)
                     || LandlockClaimManager.isClaimDecayed(world, pos)
                     || canBreachBlock(player.getMainHandStack(), state)) {
@@ -578,7 +584,7 @@ public class Breached implements ModInitializer {
             ItemStack materialStack = player.getOffHandStack();
             java.util.Optional<ReinforcementTier> requestedTier = ReinforcementTier.fromMaterial(materialStack);
             if (requestedTier.isEmpty()) {
-                player.sendMessage(Text.literal("Hold 8 logs, 2 iron blocks, 1 diamond block, or 1 netherite ingot in your offhand."), false);
+                player.sendMessage(Text.literal("Hold 8 logs, 4 copper blocks, 2 iron blocks, 2 gold blocks, 1 diamond block, or 1 netherite ingot in your offhand."), false);
                 return ActionResult.SUCCESS;
             }
 
@@ -589,7 +595,7 @@ public class Breached implements ModInitializer {
             }
 
             java.util.Optional<ReinforcementTier> currentTier = ReinforcementManager.getTier(world, targetPos, targetState);
-            if (currentTier.isPresent() && currentTier.get().level() >= tier.level()) {
+            if (currentTier.isPresent() && currentTier.get().strengthLevel() >= tier.strengthLevel()) {
                 player.sendMessage(Text.literal("This block is already " + currentTier.get().displayName() + " reinforced."), false);
                 return ActionResult.SUCCESS;
             }
@@ -607,6 +613,7 @@ public class Breached implements ModInitializer {
         PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) -> {
             if (world.isClient()
                     || player.isCreative()
+                    || state.isOf(Blocks.SNOW)
                     || !(world instanceof ServerWorld serverWorld)
                     || !(player instanceof ServerPlayerEntity serverPlayer)) {
                 return true;
@@ -987,6 +994,14 @@ public class Breached implements ModInitializer {
             world.breakBlock(pos, false, player);
             player.sendMessage(Text.literal("Ender Chests are disabled in Breached."), false);
             return false;
+        });
+    }
+
+    private static void registerPhantomRemovalEvents() {
+        ServerEntityEvents.ENTITY_LOAD.register((entity, world) -> {
+            if (entity.getType() == EntityType.PHANTOM) {
+                entity.discard();
+            }
         });
     }
 

@@ -363,9 +363,12 @@ public class BreachedClient implements ClientModInitializer {
 
             if (renderClaims) {
                 VertexConsumer shaderVisibleClaimConsumer = consumers.getBuffer(RenderLayers.linesTranslucent());
-                VertexConsumer seeThroughClaimConsumer = consumers.getBuffer(LANDLOCK_CLAIM_OUTLINE_LAYER);
                 for (LandlockClaimOutlineTarget target : claimOutlineTargets) {
                     renderLandlockClaimOutline(context.matrices(), shaderVisibleClaimConsumer, cameraPos, target, 0.95F, 2.0F);
+                }
+
+                VertexConsumer seeThroughClaimConsumer = consumers.getBuffer(LANDLOCK_CLAIM_OUTLINE_LAYER);
+                for (LandlockClaimOutlineTarget target : claimOutlineTargets) {
                     renderLandlockClaimOutline(context.matrices(), seeThroughClaimConsumer, cameraPos, target, 0.8F, 1.75F);
                 }
             }
@@ -513,7 +516,9 @@ public class BreachedClient implements ClientModInitializer {
     private static int outlineColor(ReinforcementTier tier) {
         return switch (tier) {
             case WOOD -> ColorHelper.fromFloats(0.95F, 0.76F, 0.48F, 0.22F);
+            case COPPER -> ColorHelper.fromFloats(0.95F, 0.95F, 0.46F, 0.20F);
             case IRON -> ColorHelper.fromFloats(0.95F, 0.86F, 0.88F, 0.90F);
+            case GOLD -> ColorHelper.fromFloats(0.95F, 1.0F, 0.76F, 0.16F);
             case DIAMOND -> ColorHelper.fromFloats(0.95F, 0.16F, 0.78F, 1.0F);
             case NETHERITE -> ColorHelper.fromFloats(0.95F, 0.38F, 0.22F, 0.30F);
         };
