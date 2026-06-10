@@ -19,9 +19,12 @@ public class LandlockScreenHandler extends ScreenHandler {
     public static final int DECAYED_PROPERTY = 0;
     public static final int CLAIM_COST_PROPERTY = 1;
     public static final int DAILY_UPKEEP_PROPERTY = 2;
-    public static final int STORED_UPKEEP_PROPERTY = 3;
-    public static final int MINUTES_UNTIL_DECAY_PROPERTY = 4;
-    public static final int PROPERTY_COUNT = 5;
+    public static final int STORED_UPKEEP_LOW_PROPERTY = 3;
+    public static final int STORED_UPKEEP_HIGH_PROPERTY = 4;
+    public static final int MINUTES_UNTIL_DECAY_PROPERTY = 5;
+    public static final int PROPERTY_COUNT = 6;
+    public static final int PROPERTY_SPLIT_BASE = 10000;
+    private static final int MAX_PROPERTY_VALUE = Short.MAX_VALUE;
     public static final int MAX_PROTECTED_DISPLAY_DAYS = 20;
     public static final int MAX_PROTECTED_DISPLAY_MINUTES = MAX_PROTECTED_DISPLAY_DAYS * 24 * 60;
     public static final int PROTECTED_DISPLAY_OVERFLOW_MINUTES = MAX_PROTECTED_DISPLAY_MINUTES + 1;
@@ -59,12 +62,14 @@ public class LandlockScreenHandler extends ScreenHandler {
         return properties.get(CLAIM_COST_PROPERTY);
     }
 
-    public int getDailyUpkeepUnits() {
+    public int getDailyUpkeepCost() {
         return properties.get(DAILY_UPKEEP_PROPERTY);
     }
 
     public int getStoredUpkeepUnits() {
-        return properties.get(STORED_UPKEEP_PROPERTY);
+        int low = Math.max(0, properties.get(STORED_UPKEEP_LOW_PROPERTY));
+        int high = Math.max(0, properties.get(STORED_UPKEEP_HIGH_PROPERTY));
+        return high * PROPERTY_SPLIT_BASE + low;
     }
 
     public int getMinutesUntilDecay() {
@@ -140,6 +145,14 @@ public class LandlockScreenHandler extends ScreenHandler {
         for (int column = 0; column < 9; column++) {
             addSlot(new Slot(playerInventory, column, PLAYER_INVENTORY_X + column * 18, PLAYER_HOTBAR_Y));
         }
+    }
+
+    public static int getPropertySplitLow(int value) {
+        return Math.max(0, value) % PROPERTY_SPLIT_BASE;
+    }
+
+    public static int getPropertySplitHigh(int value) {
+        return Math.min(MAX_PROPERTY_VALUE, Math.max(0, value) / PROPERTY_SPLIT_BASE);
     }
 
     private static class UpkeepSlot extends Slot {

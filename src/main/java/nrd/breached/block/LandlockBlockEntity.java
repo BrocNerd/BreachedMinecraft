@@ -35,6 +35,9 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
     private static final int REAL_TIME_DAY_TICKS = 20 * 60 * 60 * 24;
     private static final int UPKEEP_POINT_SCALE = 100;
     private static final int UPKEEP_BLOCK_MULTIPLIER = 9;
+    private static final int DAILY_UPKEEP_LINEAR_DIVISOR = 20;
+    private static final double DAILY_UPKEEP_MAX_EXTRA_MULTIPLIER = 2.0D;
+    private static final double DAILY_UPKEEP_EXPONENTIAL_SCALE = 5000.0D;
     private static final int UPKEEP_TICK_INTERVAL = 20;
     private static final int UPKEEP_PROGRESS_SAVE_INTERVAL_TICKS = 20 * 60;
     private static final int AUTHORIZED_ONLINE_SAVE_INTERVAL_TICKS = 20 * 30;
@@ -73,8 +76,9 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
             return switch (index) {
                 case LandlockScreenHandler.DECAYED_PROPERTY -> decayed ? 1 : 0;
                 case LandlockScreenHandler.CLAIM_COST_PROPERTY -> getCachedClaimCost();
-                case LandlockScreenHandler.DAILY_UPKEEP_PROPERTY -> getDailyUpkeepUnits();
-                case LandlockScreenHandler.STORED_UPKEEP_PROPERTY -> getStoredUpkeepUnits();
+                case LandlockScreenHandler.DAILY_UPKEEP_PROPERTY -> getDailyUpkeepCost();
+                case LandlockScreenHandler.STORED_UPKEEP_LOW_PROPERTY -> LandlockScreenHandler.getPropertySplitLow(getStoredUpkeepUnits());
+                case LandlockScreenHandler.STORED_UPKEEP_HIGH_PROPERTY -> LandlockScreenHandler.getPropertySplitHigh(getStoredUpkeepUnits());
                 case LandlockScreenHandler.MINUTES_UNTIL_DECAY_PROPERTY -> getMinutesUntilDecay();
                 default -> 0;
             };
@@ -256,7 +260,15 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
     }
 
     public int getDailyUpkeepCost() {
-        return Math.ceilDiv(Math.max(0, cachedClaimCost), 20);
+        int claimCost = Math.max(0, cachedClaimCost);
+        if (claimCost <= 0) {
+            return 0;
+        }
+
+        double linearCost = claimCost / (double) DAILY_UPKEEP_LINEAR_DIVISOR;
+        double sizeMultiplier = 1.0D + DAILY_UPKEEP_MAX_EXTRA_MULTIPLIER
+                * (1.0D - Math.exp(-claimCost / DAILY_UPKEEP_EXPONENTIAL_SCALE));
+        return Math.max(1, (int) Math.ceil(linearCost * sizeMultiplier));
     }
 
     public int getDailyUpkeepUnits() {
@@ -392,7 +404,9 @@ public class LandlockBlockEntity extends BlockEntity implements Inventory, Named
     private int getReinforcedBlockClaimCost(ReinforcementTier tier) {
         return switch (tier) {
             case WOOD -> 2;
+            case COPPER -> 2;
             case IRON -> 4;
+            case GOLD -> 4;
             case DIAMOND -> 8;
             case NETHERITE -> 16;
         };

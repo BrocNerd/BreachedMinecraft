@@ -50,7 +50,7 @@ public class LandlockScreen extends HandledScreen<LandlockScreenHandler> {
         int stateColor = handler.isDecayed() ? DECAYED_COLOR : STABLE_COLOR;
         context.drawText(textRenderer, "State: " + state, 8, 20, stateColor, false);
         context.drawText(textRenderer, "Size: " + handler.getClaimCost(), LEFT_STATUS_X, 32, MUTED_TEXT_COLOR, false);
-        context.drawText(textRenderer, "Cost: " + formatUpkeepPoints(handler.getDailyUpkeepUnits()) + "/day", RIGHT_STATUS_X, 32, MUTED_TEXT_COLOR, false);
+        context.drawText(textRenderer, "Cost: " + handler.getDailyUpkeepCost() + "/day", RIGHT_STATUS_X, 32, MUTED_TEXT_COLOR, false);
         context.drawText(textRenderer, "Stored: " + formatUpkeepPoints(handler.getStoredUpkeepUnits()), LEFT_STATUS_X, 44, MUTED_TEXT_COLOR, false);
         context.drawText(textRenderer, "Protected: " + getTimeUntilDecayText(), RIGHT_STATUS_X, 44, MUTED_TEXT_COLOR, false);
         context.drawText(textRenderer, playerInventoryTitle, playerInventoryTitleX, playerInventoryTitleY, TEXT_COLOR, false);
