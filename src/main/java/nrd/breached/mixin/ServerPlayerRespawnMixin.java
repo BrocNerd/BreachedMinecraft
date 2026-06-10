@@ -4,9 +4,10 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.storage.ReadView;
 import net.minecraft.storage.WriteView;
-import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.TeleportTarget;
+import nrd.breached.message.BreachedMessages;
 import nrd.breached.respawn.InitialTownhallSpawnManager;
 import nrd.breached.respawn.RespawnCooldownManager;
 import nrd.breached.worldgen.BreachedStructurePlacementManager;
@@ -50,7 +51,7 @@ public class ServerPlayerRespawnMixin {
         }
 
         if (sendMessage) {
-            player.sendMessage(Text.literal("Beds cannot be changed while a saved bed is on cooldown."), false);
+            BreachedMessages.error(player, "Beds cannot be changed while a saved bed is on cooldown.");
         }
 
         ci.cancel();
@@ -65,7 +66,7 @@ public class ServerPlayerRespawnMixin {
         }
 
         RespawnCooldownManager.trackBedRespawnPointAndCreateMessage(player, respawn)
-                .ifPresent(message -> player.sendMessage(message, false));
+                .ifPresent(message -> BreachedMessages.send(player, message, Formatting.GREEN));
     }
 
     @Inject(method = "readCustomData", at = @At("TAIL"))

@@ -20,7 +20,6 @@ import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.ItemUsageContext;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.TypeFilter;
 import net.minecraft.util.math.Box;
@@ -28,14 +27,14 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import nrd.breached.landlock.LandlockClaimManager;
+import nrd.breached.message.BreachedMessages;
 
 public final class TemporaryStorageManager {
     private static final long DESPAWN_DELAY_TICKS = 20L * 60L * 60L;
     private static final int CHECK_INTERVAL_TICKS = 20 * 10;
     private static final int MAX_REMOVALS_PER_WORLD_CHECK = 128;
-    private static final Text WILDERNESS_STORAGE_MESSAGE = Text.literal(
-            "Storage and automation placed outside an authorized Landlock claim despawn with their contents after 1 hour."
-    );
+    private static final String WILDERNESS_STORAGE_MESSAGE =
+            "Storage and automation placed outside an authorized Landlock claim despawn with their contents after 1 hour.";
 
     private TemporaryStorageManager() {
     }
@@ -63,7 +62,7 @@ public final class TemporaryStorageManager {
         long expiresAt = world.getTime() + DESPAWN_DELAY_TICKS;
         TemporaryStorageState temporaryStorageState = TemporaryStorageState.get(world.getServer());
         trackStorageBlock(world, temporaryStorageState, player, pos, state, expiresAt);
-        player.sendMessage(WILDERNESS_STORAGE_MESSAGE, false);
+        BreachedMessages.warning(player, WILDERNESS_STORAGE_MESSAGE);
     }
 
     public static void onMinecartItemUsed(ItemUsageContext context, ActionResult result, EntityType<?> minecartType) {
@@ -89,7 +88,7 @@ public final class TemporaryStorageManager {
                 minecart.getUuid(),
                 world.getTime() + DESPAWN_DELAY_TICKS
         );
-        player.sendMessage(WILDERNESS_STORAGE_MESSAGE, false);
+        BreachedMessages.warning(player, WILDERNESS_STORAGE_MESSAGE);
     }
 
     public static void untrackStorageMinecart(StorageMinecartEntity minecart) {

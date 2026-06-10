@@ -19,7 +19,7 @@ import net.minecraft.util.math.random.Random;
 import nrd.breached.mixin.HorseEntityAccessor;
 
 public final class TownhallHorseTrade {
-    public static final int PRICE_DIAMONDS = 8;
+    public static final int PRICE_DIAMONDS = 16;
 
     private static final String TOWNHALL_HORSE_MARKER = "BreachedTownHallHorse";
     private static final double MIN_MAX_HEALTH = 24.0D;

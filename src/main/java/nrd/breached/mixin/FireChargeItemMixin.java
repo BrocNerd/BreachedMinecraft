@@ -7,10 +7,10 @@ import net.minecraft.block.BlockState;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.FireChargeItem;
 import net.minecraft.item.ItemUsageContext;
-import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
+import nrd.breached.message.BreachedMessages;
 import nrd.breached.worldgen.BreachedDimensionRules;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -35,7 +35,7 @@ public class FireChargeItemMixin {
 
         PlayerEntity player = context.getPlayer();
         if (player != null) {
-            player.sendMessage(Text.literal("Nether portals can only be used at official breach sites."), false);
+            BreachedMessages.error(player, "Nether portals can only be used at official breach sites.");
         }
         cir.setReturnValue(ActionResult.FAIL);
     }

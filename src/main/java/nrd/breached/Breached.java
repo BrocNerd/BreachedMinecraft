@@ -48,6 +48,7 @@ import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
@@ -65,6 +66,7 @@ import nrd.breached.item.BreacherItem;
 import nrd.breached.landlock.LandlockClaimManager;
 import nrd.breached.landlock.LandlockMapState;
 import nrd.breached.map.BreachedMapSnapshotManager;
+import nrd.breached.message.BreachedMessages;
 import nrd.breached.network.LandlockClaimOutlinePayload;
 import nrd.breached.network.OpenBreachedArchivePayload;
 import nrd.breached.network.OpenBreachedMapPayload;
@@ -406,7 +408,7 @@ public class Breached implements ModInitializer {
             ));
             server.getPlayerManager().broadcast(Text.literal(
                     player.getGameProfile().name() + " died below Y 0. Their death is marked on the Breached Map for 1 minute."
-            ).formatted(net.minecraft.util.Formatting.RED), false);
+            ).formatted(Formatting.RED), false);
         });
     }
 
@@ -516,7 +518,7 @@ public class Breached implements ModInitializer {
                 return ActionResult.PASS;
             }
 
-            if (TownhallTraderManager.isTownhallTrader(entity)) {
+            if (TownhallTraderManager.isBreachedTrader(entity)) {
                 return ActionResult.PASS;
             }
 
@@ -527,7 +529,7 @@ public class Breached implements ModInitializer {
             }
 
             LAST_VILLAGER_TRADE_MESSAGE_TICKS.put(player.getUuid(), worldTime);
-            player.sendMessage(Text.literal("Villager trading is disabled in Breached."), false);
+            BreachedMessages.error(player, "Villager trading is disabled in Breached.");
             return ActionResult.SUCCESS;
         });
     }
@@ -542,7 +544,7 @@ public class Breached implements ModInitializer {
                 return true;
             }
 
-            player.sendMessage(Text.literal("This area is protected by a Landlock."), false);
+            BreachedMessages.protection(player, "This area is protected by a Landlock.");
             return false;
         });
     }
@@ -568,41 +570,41 @@ public class Breached implements ModInitializer {
             BlockPos targetPos = hitResult.getBlockPos();
             net.minecraft.block.BlockState targetState = world.getBlockState(targetPos);
             if (targetState.isOf(LANDLOCK_BLOCK)) {
-                player.sendMessage(Text.literal("Landlock Blocks are already wood reinforced and cannot be reinforced higher."), false);
+                BreachedMessages.warning(player, "Landlock Blocks are already wood reinforced and cannot be reinforced higher.");
                 return ActionResult.SUCCESS;
             }
 
             if (!ReinforcementManager.canStoreReinforcement(targetState)) {
-                player.sendMessage(Text.literal("This block cannot be reinforced."), false);
+                BreachedMessages.error(player, "This block cannot be reinforced.");
                 return ActionResult.SUCCESS;
             }
 
             if (!LandlockClaimManager.isInsideAnyClaim(world, targetPos)) {
-                player.sendMessage(Text.literal("Blocks can only be reinforced inside a Landlock claim."), false);
+                BreachedMessages.warning(player, "Blocks can only be reinforced inside a Landlock claim.");
                 return ActionResult.SUCCESS;
             }
 
             if (!LandlockClaimManager.canPlayerModify(world, player, targetPos)) {
-                player.sendMessage(Text.literal("You must be authorized on this Landlock to reinforce blocks."), false);
+                BreachedMessages.error(player, "You must be authorized on this Landlock to reinforce blocks.");
                 return ActionResult.SUCCESS;
             }
 
             ItemStack materialStack = player.getOffHandStack();
             java.util.Optional<ReinforcementTier> requestedTier = ReinforcementTier.fromMaterial(materialStack);
             if (requestedTier.isEmpty()) {
-                player.sendMessage(Text.literal("Hold 8 logs, 4 copper blocks, 2 iron blocks, 2 gold blocks, 1 diamond block, or 1 netherite ingot in your offhand."), false);
+                BreachedMessages.info(player, "Hold 8 logs, 4 copper blocks, 2 iron blocks, 2 gold blocks, 1 diamond block, or 1 netherite ingot in your offhand.");
                 return ActionResult.SUCCESS;
             }
 
             ReinforcementTier tier = requestedTier.get();
             if (!tier.hasMaterialCost(materialStack)) {
-                player.sendMessage(Text.literal("Need " + tier.materialDescription() + " to add " + tier.displayName() + " reinforcement."), false);
+                BreachedMessages.warning(player, "Need " + tier.materialDescription() + " to add " + tier.displayName() + " reinforcement.");
                 return ActionResult.SUCCESS;
             }
 
             java.util.Optional<ReinforcementTier> currentTier = ReinforcementManager.getTier(world, targetPos, targetState);
             if (currentTier.isPresent() && currentTier.get().strengthLevel() >= tier.strengthLevel()) {
-                player.sendMessage(Text.literal("This block is already " + currentTier.get().displayName() + " reinforced."), false);
+                BreachedMessages.warning(player, "This block is already " + currentTier.get().displayName() + " reinforced.");
                 return ActionResult.SUCCESS;
             }
 
@@ -612,7 +614,7 @@ public class Breached implements ModInitializer {
             }
 
             world.playSound(null, targetPos, SoundEvents.BLOCK_ANVIL_USE, SoundCategory.BLOCKS, 0.75F, 1.25F);
-            player.sendMessage(Text.literal("Added " + tier.displayName() + " reinforcement."), false);
+            BreachedMessages.success(player, "Added " + tier.displayName() + " reinforcement.");
             return ActionResult.SUCCESS;
         });
 
@@ -637,17 +639,17 @@ public class Breached implements ModInitializer {
                         return true;
                     }
 
-                    player.sendMessage(Text.literal("Only the Landlock owner can break it with a Reinforcer."), false);
+                    BreachedMessages.error(player, "Only the Landlock owner can break it with a Reinforcer.");
                     return false;
                 }
 
                 if (!LandlockClaimManager.canPlayerModify(world, player, pos)) {
-                    player.sendMessage(Text.literal("You must be authorized on this Landlock to remove reinforcement."), false);
+                    BreachedMessages.error(player, "You must be authorized on this Landlock to remove reinforcement.");
                     return false;
                 }
 
                 ReinforcementManager.removeStoredTier(serverWorld, pos);
-                player.sendMessage(Text.literal("Removed " + reinforcementTier.get().displayName() + " reinforcement."), false);
+                BreachedMessages.success(player, "Removed " + reinforcementTier.get().displayName() + " reinforcement.");
                 return false;
             }
 
@@ -657,16 +659,16 @@ public class Breached implements ModInitializer {
                 }
 
                 ReinforcementManager.breakBreacher(stack, serverWorld, serverPlayer);
-                player.sendMessage(Text.literal("Your Breacher broke against the reinforced block."), false);
+                BreachedMessages.error(player, "Your Breacher broke against the reinforced block.");
                 return false;
             }
 
             if (state.isOf(LANDLOCK_BLOCK) && isLandlockOwner(world, pos, blockEntity, player)) {
-                player.sendMessage(Text.literal("You must use a Reinforcer to break this Landlock and get it back."), false);
+                BreachedMessages.warning(player, "You must use a Reinforcer to break this Landlock and get it back.");
                 return false;
             }
 
-            player.sendMessage(Text.literal("Reinforced blocks require a Breacher to break or a Reinforcer to unreinforce."), false);
+            BreachedMessages.warning(player, "Reinforced blocks require a Breacher to break or a Reinforcer to unreinforce.");
             return false;
         });
 
@@ -887,25 +889,25 @@ public class Breached implements ModInitializer {
 
             if (player.getStackInHand(hand).isOf(LANDLOCK_BLOCK.asItem())) {
                 if (placementContext.getBlockPos().getY() < LandlockClaimManager.MIN_LANDLOCK_PLACEMENT_Y) {
-                    player.sendMessage(Text.literal("Landlock Blocks cannot be placed below Y " + LandlockClaimManager.MIN_LANDLOCK_PLACEMENT_Y + "."), false);
+                    BreachedMessages.error(player, "Landlock Blocks cannot be placed below Y " + LandlockClaimManager.MIN_LANDLOCK_PLACEMENT_Y + ".");
                     syncRejectedBlockPlacement(player);
                     return ActionResult.FAIL;
                 }
 
                 if (LandlockClaimManager.countPlayerLandlockAuthorizations(world, player.getUuid()) >= LandlockClaimManager.MAX_AUTHORIZED_LANDLOCKS) {
-                    player.sendMessage(Text.literal("You are already authorized on the maximum number of Landlocks."), false);
+                    BreachedMessages.error(player, "You are already authorized on the maximum number of Landlocks.");
                     syncRejectedBlockPlacement(player);
                     return ActionResult.FAIL;
                 }
 
                 if (BreachedStructurePlacementManager.isInsideMajorStructureLandlockExclusion(world, placementContext.getBlockPos())) {
-                    player.sendMessage(Text.literal("Landlock Blocks cannot be placed within 12 blocks of a protected major structure."), false);
+                    BreachedMessages.error(player, "Landlock Blocks cannot be placed within 12 blocks of a protected major structure.");
                     syncRejectedBlockPlacement(player);
                     return ActionResult.FAIL;
                 }
 
                 if (LandlockClaimManager.isTooCloseToExistingLandlock(world, placementContext.getBlockPos())) {
-                    player.sendMessage(Text.literal("This Landlock is too close to another Landlock."), false);
+                    BreachedMessages.error(player, "This Landlock is too close to another Landlock.");
                     syncRejectedBlockPlacement(player);
                     return ActionResult.FAIL;
                 }
@@ -914,7 +916,7 @@ public class Breached implements ModInitializer {
             BlockPos placementPos = placementContext.getBlockPos();
             if (LandlockClaimManager.canPlayerModify(world, player, placementPos)) {
                 if (LandlockClaimManager.isInsideAnyClaim(world, placementPos) && !player.getOffHandStack().isOf(REINFORCER)) {
-                    player.sendMessage(Text.literal("Hold a Reinforcer in your offhand to build inside your Landlock claim."), false);
+                    BreachedMessages.info(player, "Hold a Reinforcer in your offhand to build inside your Landlock claim.");
                     syncRejectedBlockPlacement(player);
                     return ActionResult.FAIL;
                 }
@@ -922,7 +924,7 @@ public class Breached implements ModInitializer {
                 return ActionResult.PASS;
             }
 
-            player.sendMessage(Text.literal("This area is protected by a Landlock."), false);
+            BreachedMessages.protection(player, "This area is protected by a Landlock.");
             syncRejectedBlockPlacement(player);
             return ActionResult.FAIL;
         });
@@ -951,7 +953,7 @@ public class Breached implements ModInitializer {
                 return itemUseResult;
             }
 
-            player.sendMessage(Text.literal("This door is protected by a Landlock."), false);
+            BreachedMessages.protection(player, "This door is protected by a Landlock.");
             return ActionResult.FAIL;
         });
     }
@@ -986,7 +988,7 @@ public class Breached implements ModInitializer {
             }
 
             if (!world.isClient()) {
-                player.sendMessage(Text.literal("Ender Chests are disabled in Breached."), false);
+                BreachedMessages.error(player, "Ender Chests are disabled in Breached.");
             }
 
             return ActionResult.FAIL;
@@ -998,7 +1000,7 @@ public class Breached implements ModInitializer {
             }
 
             world.breakBlock(pos, false, player);
-            player.sendMessage(Text.literal("Ender Chests are disabled in Breached."), false);
+            BreachedMessages.error(player, "Ender Chests are disabled in Breached.");
             return false;
         });
     }
@@ -1028,9 +1030,9 @@ public class Breached implements ModInitializer {
             }
 
             if (LandlockClaimManager.isInsideAnyClaim(world, targetPos)) {
-                player.sendMessage(Text.literal("This block is inside a Landlock claim."), false);
+                BreachedMessages.info(player, "This block is inside a Landlock claim.");
             } else {
-                player.sendMessage(Text.literal("This block is not claimed."), false);
+                BreachedMessages.info(player, "This block is not claimed.");
             }
 
             return ActionResult.SUCCESS;
@@ -1039,17 +1041,17 @@ public class Breached implements ModInitializer {
 
     private static void selectLandlockForProbeConfiguration(PlayerEntity player, World world, BlockPos landlockPos) {
         if (!(world.getBlockEntity(landlockPos) instanceof LandlockBlockEntity landlock)) {
-            player.sendMessage(Text.literal("This Landlock has no claim data."), false);
+            BreachedMessages.error(player, "This Landlock has no claim data.");
             return;
         }
 
         if (!landlock.isAuthorized(player.getUuid())) {
-            player.sendMessage(Text.literal("You must be authorized on this Landlock to configure it."), false);
+            BreachedMessages.error(player, "You must be authorized on this Landlock to configure it.");
             return;
         }
 
         PROBE_LANDLOCK_SELECTIONS.put(player.getUuid(), new ProbeLandlockSelection(world.getRegistryKey(), landlockPos.toImmutable()));
-        player.sendMessage(Text.literal("Selected this Landlock. Right-click a block inside its claim with the Probe to set the claim center."), false);
+        BreachedMessages.info(player, "Selected this Landlock. Right-click a block inside its claim with the Probe to set the claim center.");
     }
 
     private static boolean trySetSelectedLandlockClaimCenter(PlayerEntity player, World world, BlockPos newClaimCenter) {
@@ -1060,24 +1062,24 @@ public class Breached implements ModInitializer {
 
         if (!selection.worldKey().equals(world.getRegistryKey())) {
             PROBE_LANDLOCK_SELECTIONS.remove(player.getUuid());
-            player.sendMessage(Text.literal("Selected Landlock is in another dimension."), false);
+            BreachedMessages.error(player, "Selected Landlock is in another dimension.");
             return true;
         }
 
         if (!(world.getBlockEntity(selection.landlockPos()) instanceof LandlockBlockEntity landlock)) {
             PROBE_LANDLOCK_SELECTIONS.remove(player.getUuid());
-            player.sendMessage(Text.literal("Selected Landlock no longer exists."), false);
+            BreachedMessages.error(player, "Selected Landlock no longer exists.");
             return true;
         }
 
         if (!landlock.isAuthorized(player.getUuid())) {
             PROBE_LANDLOCK_SELECTIONS.remove(player.getUuid());
-            player.sendMessage(Text.literal("You are no longer authorized on the selected Landlock."), false);
+            BreachedMessages.error(player, "You are no longer authorized on the selected Landlock.");
             return true;
         }
 
         if (!LandlockClaimManager.canSetClaimCenter(landlock, newClaimCenter)) {
-            player.sendMessage(Text.literal("New claim center must be inside the selected Landlock claim and keep the Landlock protected."), false);
+            BreachedMessages.error(player, "New claim center must be inside the selected Landlock claim and keep the Landlock protected.");
             return true;
         }
 
@@ -1086,10 +1088,10 @@ public class Breached implements ModInitializer {
             LandlockMapState.update(serverWorld, landlock);
         }
         PROBE_LANDLOCK_SELECTIONS.remove(player.getUuid());
-        player.sendMessage(Text.literal("Landlock claim center set to x "
+        BreachedMessages.success(player, "Landlock claim center set to x "
                 + newClaimCenter.getX()
                 + ", y " + newClaimCenter.getY()
-                + ", z " + newClaimCenter.getZ() + "."), false);
+                + ", z " + newClaimCenter.getZ() + ".");
         return true;
     }
 

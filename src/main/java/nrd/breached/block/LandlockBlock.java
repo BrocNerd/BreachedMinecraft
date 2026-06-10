@@ -12,7 +12,6 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.ItemScatterer;
 import net.minecraft.util.hit.BlockHitResult;
@@ -21,6 +20,7 @@ import net.minecraft.world.World;
 import nrd.breached.Breached;
 import nrd.breached.landlock.LandlockClaimManager;
 import nrd.breached.landlock.LandlockMapState;
+import nrd.breached.message.BreachedMessages;
 
 import java.util.UUID;
 
@@ -75,13 +75,13 @@ public class LandlockBlock extends BlockWithEntity {
         }
 
         if (!(world.getBlockEntity(pos) instanceof LandlockBlockEntity landlock)) {
-            player.sendMessage(Text.literal("This Landlock has no owner."), false);
+            BreachedMessages.error(player, "This Landlock has no owner.");
             return ActionResult.SUCCESS;
         }
 
         UUID ownerUuid = landlock.getOwnerUuid();
         if (ownerUuid == null) {
-            player.sendMessage(Text.literal("This Landlock has no owner."), false);
+            BreachedMessages.error(player, "This Landlock has no owner.");
         } else if (player.isSneaking()) {
             handleSneakUse(world, player, landlock, ownerUuid);
         } else if (ownerUuid.equals(player.getUuid())) {
@@ -90,7 +90,7 @@ public class LandlockBlock extends BlockWithEntity {
         } else if (landlock.isAuthorized(player.getUuid())) {
             openUpkeepInventory(player, landlock);
         } else {
-            player.sendMessage(Text.literal("Sneak right-click this Landlock to authorize yourself."), false);
+            BreachedMessages.info(player, "Sneak right-click this Landlock to authorize yourself.");
         }
 
         return ActionResult.SUCCESS;
@@ -115,23 +115,23 @@ public class LandlockBlock extends BlockWithEntity {
             return;
         }
 
-        player.sendMessage(Text.literal("Landlock Size is " + claimSize
-                + ". Claims covering more blocks are harder to upkeep. Use a Probe to move the claim center if this was not intentional."), false);
+        BreachedMessages.warning(player, "Landlock Size is " + claimSize
+                + ". Claims covering more blocks are harder to upkeep. Use a Probe to move the claim center if this was not intentional.");
     }
 
     private static void handleSneakUse(World world, PlayerEntity player, LandlockBlockEntity landlock, UUID ownerUuid) {
         if (ownerUuid.equals(player.getUuid())) {
             landlock.updateOwnerName(player);
-            player.sendMessage(Text.literal("You own this Landlock. Break it to remove it from your authorization count."), false);
+            BreachedMessages.info(player, "You own this Landlock. Break it to remove it from your authorization count.");
         } else if (landlock.removeAuthorizedPlayer(player.getUuid())) {
             updateLandlockMapState(world, landlock);
-            player.sendMessage(Text.literal("You are no longer authorized on this Landlock."), false);
+            BreachedMessages.warning(player, "You are no longer authorized on this Landlock.");
         } else if (LandlockClaimManager.countPlayerLandlockAuthorizations(world, player.getUuid()) < LandlockClaimManager.MAX_AUTHORIZED_LANDLOCKS) {
             landlock.addAuthorizedPlayer(player.getUuid());
             updateLandlockMapState(world, landlock);
-            player.sendMessage(Text.literal("You are now authorized on this Landlock."), false);
+            BreachedMessages.success(player, "You are now authorized on this Landlock.");
         } else {
-            player.sendMessage(Text.literal("You are already authorized on the maximum number of Landlocks."), false);
+            BreachedMessages.error(player, "You are already authorized on the maximum number of Landlocks.");
         }
     }
 

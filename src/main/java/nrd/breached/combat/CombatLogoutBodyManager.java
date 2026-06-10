@@ -17,6 +17,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.world.World;
+import nrd.breached.message.BreachedMessages;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -43,7 +44,7 @@ public final class CombatLogoutBodyManager {
             UUID playerUuid = handler.player.getUuid();
             removeExistingBodyAndRestoreLoot(handler.player, server);
             if (CombatLogoutLootState.get(server).hasPendingDeath(playerUuid)) {
-                handler.player.sendMessage(Text.literal("Your combat logout body was killed.").formatted(Formatting.RED), false);
+                BreachedMessages.error(handler.player, "Your combat logout body was killed.");
             }
         });
         ServerTickEvents.END_SERVER_TICK.register(CombatLogoutBodyManager::tick);
@@ -122,7 +123,7 @@ public final class CombatLogoutBodyManager {
         lootState.addPendingDeath(body.playerUuid());
         ServerPlayerEntity player = server.getPlayerManager().getPlayer(body.playerUuid());
         if (player != null) {
-            player.sendMessage(Text.literal("Your combat logout body was killed.").formatted(Formatting.RED), false);
+            BreachedMessages.error(player, "Your combat logout body was killed.");
         }
 
         server.getPlayerManager().broadcast(Text.literal(body.playerName()

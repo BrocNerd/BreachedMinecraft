@@ -43,6 +43,7 @@ import net.minecraft.world.chunk.WorldChunk;
 import net.minecraft.world.level.ServerWorldProperties;
 import nrd.breached.config.BreachedConfig;
 import nrd.breached.landlock.LandlockClaimManager;
+import nrd.breached.message.BreachedMessages;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -92,6 +93,7 @@ public final class BreachedStructurePlacementManager {
     private static final int EYEBALL_CANDIDATE_SPREAD_BLOCKS = 48;
     private static final int EYEBALL_ORIGIN_Y = 200;
     private static final int PROTECTED_STRUCTURE_CUBOID_MARGIN = 3;
+    private static final int TOWNHALL_PROTECTED_STRUCTURE_CUBOID_MARGIN = 15;
     private static final int MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN = 12;
     private static final int TOWNHALL_LEGACY_STAIR_EXTENSION_SEARCH_STEPS = 128;
     private static final int SKYHOME_MIN_ORIGIN_Y = 120;
@@ -459,7 +461,7 @@ public final class BreachedStructurePlacementManager {
             return Text.literal("Entering Town Hall Safezone").formatted(Formatting.GOLD);
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.SWORD_STATUE))) {
-            return Text.literal("Entering Statue").formatted(Formatting.BLACK);
+            return Text.literal("Entering Statue").formatted(Formatting.GRAY);
         }
         if (structureKey.equals(PORTAL_STRUCTURE_KEY)) {
             return Text.literal("Entering Nether Portal").formatted(Formatting.DARK_PURPLE);
@@ -4208,7 +4210,7 @@ public final class BreachedStructurePlacementManager {
             return Optional.empty();
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.SWORD_STATUE))) {
-            return Optional.of(Text.literal("Statue has been restocked").formatted(Formatting.BLACK));
+            return Optional.of(Text.literal("Statue has been restocked").formatted(Formatting.GRAY));
         }
         if (structureKey.equals(BreachedStructureDefinitions.key(BreachedStructureDefinitions.PINK_TREE))) {
             return Optional.of(Text.literal("Great Tree has been restocked").formatted(Formatting.LIGHT_PURPLE));
@@ -5640,7 +5642,7 @@ public final class BreachedStructurePlacementManager {
             }
 
             if (shouldProtect(world, player, pos)) {
-                player.sendMessage(Text.literal("Protected Breached structures cannot be modified."), false);
+                BreachedMessages.protection(player, "Protected Breached structures cannot be modified.");
                 return false;
             }
 
@@ -5665,7 +5667,7 @@ public final class BreachedStructurePlacementManager {
                 return ActionResult.PASS;
             }
 
-            player.sendMessage(Text.literal("Protected Breached structures cannot be modified."), false);
+            BreachedMessages.protection(player, "Protected Breached structures cannot be modified.");
             syncRejectedBlockPlacement(player);
             return ActionResult.FAIL;
         });
@@ -5695,7 +5697,7 @@ public final class BreachedStructurePlacementManager {
             }
 
             if (attackingPlayer instanceof ServerPlayerEntity serverAttacker) {
-                serverAttacker.sendMessage(Text.literal("PvP is disabled inside the Town Hall safezone."), false);
+                BreachedMessages.error(serverAttacker, "PvP is disabled inside the Town Hall safezone.");
             }
             return false;
         });
@@ -5860,6 +5862,10 @@ public final class BreachedStructurePlacementManager {
 
     private static int getProtectedStructureCuboidMargin(BreachedStructureDefinition definition) {
         String structureKey = BreachedStructureDefinitions.key(definition);
+        if (structureKey.equals(TOWNHALL_STRUCTURE_KEY)) {
+            return TOWNHALL_PROTECTED_STRUCTURE_CUBOID_MARGIN;
+        }
+
         if (structureKey.equals(EYEBALL_STRUCTURE_KEY)
                 || structureKey.equals(END_PORTAL_STRUCTURE_KEY)
                 || structureKey.equals(SANCTUARY_STRUCTURE_KEY)) {

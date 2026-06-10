@@ -95,6 +95,10 @@ public class TeamData {
         invitedPlayers.add(playerId);
     }
 
+    public void removeInvite(UUID playerId) {
+        invitedPlayers.remove(playerId);
+    }
+
     public boolean hasInvite(UUID playerId) {
         return invitedPlayers.contains(playerId);
     }

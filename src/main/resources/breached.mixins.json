@@ -20,6 +20,8 @@
     "ItemStackMixin",
     "KillCommandMixin",
     "MerchantEntityAccessor",
+    "MerchantInventoryMixin",
+    "MerchantScreenHandlerMixin",
     "MinecartItemMixin",
     "PlayerManagerMixin",
     "PlayerInventoryMixin",

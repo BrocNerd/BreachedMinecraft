@@ -77,6 +77,11 @@ public class TeamState extends PersistentState {
         markDirty();
     }
 
+    public void removeInvite(TeamData team, UUID playerId) {
+        team.removeInvite(playerId);
+        markDirty();
+    }
+
     public void addMember(TeamData team, UUID playerId, String playerName) {
         team.addMember(playerId, playerName);
         teamIdsByPlayer.put(playerId, team.getId());
