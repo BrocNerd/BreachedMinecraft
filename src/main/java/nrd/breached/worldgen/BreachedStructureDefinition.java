@@ -23,7 +23,6 @@ public record BreachedStructureDefinition(
         int maxRadius,
         boolean roughlyOpposed,
         long seedSalt,
-        int protectionRadius,
         int preferredSpacingFromBreachedStructures,
         int minimumSpacingFromBreachedStructures,
         boolean avoidTrees,
@@ -115,10 +114,6 @@ public record BreachedStructureDefinition(
         IGNORE_AIR
     }
 
-    public int protectionRadiusSquared() {
-        return protectionRadius * protectionRadius;
-    }
-
     public BreachedStructureDefinition withCountPerWorld(int countPerWorld) {
         return new BreachedStructureDefinition(
                 logName,
@@ -136,7 +131,6 @@ public record BreachedStructureDefinition(
                 maxRadius,
                 roughlyOpposed,
                 seedSalt,
-                protectionRadius,
                 preferredSpacingFromBreachedStructures,
                 minimumSpacingFromBreachedStructures,
                 avoidTrees,
@@ -186,7 +180,6 @@ public record BreachedStructureDefinition(
                 maxRadius,
                 roughlyOpposed,
                 seedSalt,
-                protectionRadius,
                 preferredSpacingFromBreachedStructures,
                 minimumSpacingFromBreachedStructures,
                 avoidTrees,
@@ -252,7 +245,6 @@ public record BreachedStructureDefinition(
                 maxRadius,
                 roughlyOpposed,
                 seedSalt,
-                protectionRadius,
                 preferredSpacingFromBreachedStructures,
                 minimumSpacingFromBreachedStructures,
                 avoidTrees,

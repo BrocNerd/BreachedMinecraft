@@ -35,6 +35,7 @@ public class BreachedStructurePlacementState extends PersistentState {
     private static final String SIZE_X_KEY = "size_x";
     private static final String SIZE_Y_KEY = "size_y";
     private static final String SIZE_Z_KEY = "size_z";
+    private static final String PROTECTED_EXTENSION_BLOCKS_KEY = "protected_extension_blocks";
     private static final String RETIRED_KEY = "retired";
     private static final String PLAYER_TOUCHED_KEY = "player_touched";
     private static final String NEXT_MINOR_DESPAWN_TIME_KEY = "next_minor_despawn_time";
@@ -143,6 +144,7 @@ public class BreachedStructurePlacementState extends PersistentState {
                 placement.size().getX(),
                 placement.size().getY(),
                 placement.size().getZ(),
+                Set.of(),
                 false,
                 false,
                 nextMinorDespawnTime,
@@ -168,7 +170,18 @@ public class BreachedStructurePlacementState extends PersistentState {
             List<SavedLootContainer> lootContainers,
             long nextRestockTime
     ) {
-        markPlaced(key, placement, placedTime, lootContainers, true, nextRestockTime);
+        markPlaced(key, placement, placedTime, lootContainers, nextRestockTime, Set.of());
+    }
+
+    public void markPlaced(
+            String key,
+            BreachedStructurePlacement placement,
+            long placedTime,
+            List<SavedLootContainer> lootContainers,
+            long nextRestockTime,
+            Set<BlockPos> protectedExtensionBlocks
+    ) {
+        markPlaced(key, placement, placedTime, lootContainers, true, nextRestockTime, protectedExtensionBlocks);
     }
 
     private void markPlaced(
@@ -189,6 +202,18 @@ public class BreachedStructurePlacementState extends PersistentState {
             boolean lootContainersScanned,
             long nextRestockTime
     ) {
+        markPlaced(key, placement, placedTime, lootContainers, lootContainersScanned, nextRestockTime, Set.of());
+    }
+
+    private void markPlaced(
+            String key,
+            BreachedStructurePlacement placement,
+            long placedTime,
+            List<SavedLootContainer> lootContainers,
+            boolean lootContainersScanned,
+            long nextRestockTime,
+            Set<BlockPos> protectedExtensionBlocks
+    ) {
         placements.put(key, new SavedPlacement(
                 BreachedStructureSpawnManager.getProtectedCenterX(placement),
                 BreachedStructureSpawnManager.getProtectedCenterZ(placement),
@@ -203,6 +228,7 @@ public class BreachedStructurePlacementState extends PersistentState {
                 placement.size().getX(),
                 placement.size().getY(),
                 placement.size().getZ(),
+                protectedExtensionBlocks,
                 false,
                 false,
                 0L,
@@ -213,7 +239,7 @@ public class BreachedStructurePlacementState extends PersistentState {
     }
 
     public void markPlaced(String key, int centerX, int centerZ) {
-        placements.put(key, new SavedPlacement(centerX, centerZ, centerX, 0, centerZ, 0L, List.of(), false, 0L, 0L, 0, 0, 0, false, false, 0L, List.of(), List.of()));
+        placements.put(key, new SavedPlacement(centerX, centerZ, centerX, 0, centerZ, 0L, List.of(), false, 0L, 0L, 0, 0, 0, Set.of(), false, false, 0L, List.of(), List.of()));
         markDirty();
     }
 
@@ -246,6 +272,7 @@ public class BreachedStructurePlacementState extends PersistentState {
                 placement.sizeX(),
                 placement.sizeY(),
                 placement.sizeZ(),
+                placement.protectedExtensionBlocks(),
                 placement.retired(),
                 placement.playerTouched(),
                 placement.nextMinorDespawnTime(),
@@ -279,6 +306,7 @@ public class BreachedStructurePlacementState extends PersistentState {
                 placement.sizeX(),
                 placement.sizeY(),
                 placement.sizeZ(),
+                placement.protectedExtensionBlocks(),
                 placement.retired(),
                 placement.playerTouched(),
                 placement.nextMinorDespawnTime(),
@@ -478,6 +506,16 @@ public class BreachedStructurePlacementState extends PersistentState {
             placementNbt.putBoolean(PLAYER_TOUCHED_KEY, placement.playerTouched());
             placementNbt.putLong(NEXT_MINOR_DESPAWN_TIME_KEY, placement.nextMinorDespawnTime());
 
+            NbtList protectedExtensionBlockList = new NbtList();
+            for (BlockPos protectedExtensionBlock : placement.protectedExtensionBlocks()) {
+                NbtCompound protectedExtensionBlockNbt = new NbtCompound();
+                protectedExtensionBlockNbt.putInt(X_KEY, protectedExtensionBlock.getX());
+                protectedExtensionBlockNbt.putInt(Y_KEY, protectedExtensionBlock.getY());
+                protectedExtensionBlockNbt.putInt(Z_KEY, protectedExtensionBlock.getZ());
+                protectedExtensionBlockList.add(protectedExtensionBlockNbt);
+            }
+            placementNbt.put(PROTECTED_EXTENSION_BLOCKS_KEY, protectedExtensionBlockList);
+
             NbtList cleanupBlockList = new NbtList();
             for (BlockPos cleanupBlock : placement.cleanupBlocks()) {
                 NbtCompound cleanupBlockNbt = new NbtCompound();
@@ -576,6 +614,7 @@ public class BreachedStructurePlacementState extends PersistentState {
                         placementNbt.get().getInt(SIZE_X_KEY, 0),
                         placementNbt.get().getInt(SIZE_Y_KEY, 0),
                         placementNbt.get().getInt(SIZE_Z_KEY, 0),
+                        readProtectedExtensionBlocks(placementNbt.get()),
                         placementNbt.get().getBoolean(RETIRED_KEY, false),
                         placementNbt.get().getBoolean(PLAYER_TOUCHED_KEY, false),
                         placementNbt.get().getLong(NEXT_MINOR_DESPAWN_TIME_KEY, 0L),
@@ -676,6 +715,21 @@ public class BreachedStructurePlacementState extends PersistentState {
         return lootContainers;
     }
 
+    private static Set<BlockPos> readProtectedExtensionBlocks(NbtCompound placementNbt) {
+        Set<BlockPos> protectedExtensionBlocks = new HashSet<>();
+        NbtList protectedExtensionBlockList = placementNbt.getListOrEmpty(PROTECTED_EXTENSION_BLOCKS_KEY);
+        for (int index = 0; index < protectedExtensionBlockList.size(); index++) {
+            NbtCompound protectedExtensionBlockNbt = protectedExtensionBlockList.getCompoundOrEmpty(index);
+            protectedExtensionBlocks.add(new BlockPos(
+                    protectedExtensionBlockNbt.getInt(X_KEY, 0),
+                    protectedExtensionBlockNbt.getInt(Y_KEY, 0),
+                    protectedExtensionBlockNbt.getInt(Z_KEY, 0)
+            ));
+        }
+
+        return protectedExtensionBlocks;
+    }
+
     private static List<BlockPos> readCleanupBlocks(NbtCompound placementNbt) {
         List<BlockPos> cleanupBlocks = new ArrayList<>();
         NbtList cleanupBlockList = placementNbt.getListOrEmpty(CLEANUP_BLOCKS_KEY);
@@ -728,6 +782,7 @@ public class BreachedStructurePlacementState extends PersistentState {
             int sizeX,
             int sizeY,
             int sizeZ,
+            Set<BlockPos> protectedExtensionBlocks,
             boolean retired,
             boolean playerTouched,
             long nextMinorDespawnTime,
@@ -736,6 +791,7 @@ public class BreachedStructurePlacementState extends PersistentState {
     ) {
         public SavedPlacement {
             lootContainers = List.copyOf(lootContainers);
+            protectedExtensionBlocks = Set.copyOf(protectedExtensionBlocks);
             cleanupBlocks = List.copyOf(cleanupBlocks);
             restoreBlocks = List.copyOf(restoreBlocks);
             sizeX = Math.max(0, sizeX);
@@ -789,6 +845,7 @@ public class BreachedStructurePlacementState extends PersistentState {
                 sizeX,
                 sizeY,
                 sizeZ,
+                placement.protectedExtensionBlocks(),
                 retired,
                 playerTouched,
                 nextMinorDespawnTime,

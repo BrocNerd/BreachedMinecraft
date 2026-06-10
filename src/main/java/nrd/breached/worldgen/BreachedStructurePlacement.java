@@ -4,6 +4,8 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3i;
 
+import java.util.List;
+
 public record BreachedStructurePlacement(
         Identifier structureId,
         String logName,
@@ -12,6 +14,10 @@ public record BreachedStructurePlacement(
         int surfaceY,
         int minSurfaceY,
         int maxSurfaceY,
-        int heightRange
+        int heightRange,
+        List<BlockPos> extensionBlocks
 ) {
+    public BreachedStructurePlacement {
+        extensionBlocks = List.copyOf(extensionBlocks);
+    }
 }

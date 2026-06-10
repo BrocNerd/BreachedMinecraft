@@ -91,7 +91,9 @@ public final class BreachedStructurePlacementManager {
     private static final int EYEBALL_BORDER_MARGIN_BLOCKS = 100;
     private static final int EYEBALL_CANDIDATE_SPREAD_BLOCKS = 48;
     private static final int EYEBALL_ORIGIN_Y = 200;
+    private static final int PROTECTED_STRUCTURE_CUBOID_MARGIN = 3;
     private static final int MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN = 12;
+    private static final int TOWNHALL_LEGACY_STAIR_EXTENSION_SEARCH_STEPS = 128;
     private static final int SKYHOME_MIN_ORIGIN_Y = 120;
     private static final int SKYHOME_MAX_ORIGIN_Y = 200;
     private static final int SANCTUARY_TARGET_ORIGIN_Y = -48;
@@ -105,8 +107,6 @@ public final class BreachedStructurePlacementManager {
     private static final int SANCTUARY_SURFACE_EXIT_CLEARANCE = 2;
     private static final int SANCTUARY_SURFACE_VEGETATION_CLEAR_RADIUS = 3;
     private static final int SANCTUARY_SURFACE_VEGETATION_CLEAR_DEPTH = 8;
-    private static final int SANCTUARY_ACCESS_PROTECTION_MARGIN = 4;
-    private static final int SANCTUARY_ACCESS_PROTECTION_SURFACE_PADDING = 3;
     private static final double SANCTUARY_AIR_SAMPLE_PENALTY = 100_000.0D;
     private static final double SANCTUARY_SHELL_AIR_SAMPLE_PENALTY = 180_000.0D;
     private static final double SANCTUARY_NON_DEEPSLATE_SAMPLE_PENALTY = 3_000.0D;
@@ -134,7 +134,6 @@ public final class BreachedStructurePlacementManager {
     private static final Set<ForcedMinorDespawnChunk> FORCED_MINOR_DESPAWN_CHUNKS = new HashSet<>();
     private static final Set<PendingMinorPoiChunk> PENDING_MINOR_POI_CHUNKS = new HashSet<>();
     private static final Set<Long> COMPLETED_PLANNED_STRUCTURE_WORLDS = new HashSet<>();
-    private static final Map<String, Set<BlockPos>> EXACT_PROTECTION_BLOCKS = new HashMap<>();
     private static final Map<UUID, String> PLAYER_MAJOR_ZONE_KEYS = new HashMap<>();
 
     private BreachedStructurePlacementManager() {
@@ -407,7 +406,7 @@ public final class BreachedStructurePlacementManager {
                 continue;
             }
 
-            long distanceSquared = getMajorStructureZoneDistanceSquared(definition.get(), placement, pos);
+            long distanceSquared = getMajorStructureZoneDistanceSquared(world, definition.get(), placement, pos);
             if (distanceSquared < 0L) {
                 continue;
             }
@@ -429,20 +428,12 @@ public final class BreachedStructurePlacementManager {
     }
 
     private static long getMajorStructureZoneDistanceSquared(
+            ServerWorld world,
             BreachedStructureDefinition definition,
             BreachedStructurePlacementState.SavedPlacement placement,
             BlockPos pos
     ) {
-        if (definition.protectedStructure() && definition.protectionRadius() > 0) {
-            long xDistance = pos.getX() - placement.centerX();
-            long yDistance = pos.getY() - getProtectedCenterY(placement, pos);
-            long zDistance = pos.getZ() - placement.centerZ();
-            long distanceSquared = xDistance * xDistance + yDistance * yDistance + zDistance * zDistance;
-            return distanceSquared <= definition.protectionRadiusSquared() ? distanceSquared : -1L;
-        }
-
-        if ((isExactProtectedStructure(definition) || isVolumeProtectedStructure(definition))
-                && isInsidePlacementBounds(placement, pos)) {
+        if (definition.protectedStructure() && isProtectedStructurePosition(world, definition, placement, pos)) {
             return 0L;
         }
 
@@ -2580,15 +2571,17 @@ public final class BreachedStructurePlacementManager {
                 definition.rotation(),
                 evaluation.site()
         );
-        BreachedStructureSupportGenerator.generate(world, definition, placement);
-        applySanctuaryAccessFeatures(world, definition, placement);
+        Set<BlockPos> protectedExtensionBlocks = new HashSet<>(placement.extensionBlocks());
+        protectedExtensionBlocks.addAll(BreachedStructureSupportGenerator.generate(world, definition, placement));
+        protectedExtensionBlocks.addAll(applySanctuaryAccessFeatures(world, definition, placement));
         restoreSanctuaryPitcherCrops(world, definition, evaluation.template(), placement);
         state.markPlaced(
                 pendingPlacement.placementKey(),
                 placement,
                 world.getTime(),
                 getSavedLootContainers(world, definition, evaluation.template(), placement),
-                createNextLootRestockTime(world, pendingPlacement.placementKey())
+                createNextLootRestockTime(world, pendingPlacement.placementKey()),
+                protectedExtensionBlocks
         );
         if (isTownhallStructure(definition)) {
             syncTownhallWorldSpawn(world, state);
@@ -2601,18 +2594,11 @@ public final class BreachedStructurePlacementManager {
                 closeOfficialPortalStructures(world, state, portalEventType.get());
             }
         }
-        if (isExactProtectedStructure(definition)) {
+        if (definition.protectedStructure()) {
             System.out.println("[Breached] Registered protected structure " + definition.logName()
-                    + " using exact template-block protection.");
-        } else if (isVolumeProtectedStructure(definition)) {
-            System.out.println("[Breached] Registered protected structure " + definition.logName()
-                    + " using exact placement-volume protection.");
-        } else if (definition.protectedStructure()) {
-            System.out.println("[Breached] Registered protected structure " + definition.logName()
-                    + " around x " + BreachedStructureSpawnManager.getProtectedCenterX(placement)
-                    + ", y " + BreachedStructureSpawnManager.getProtectedCenterY(placement)
-                    + ", z " + BreachedStructureSpawnManager.getProtectedCenterZ(placement)
-                    + " radius " + definition.protectionRadius() + ".");
+                    + " using strict placement-cuboid protection with "
+                    + protectedExtensionBlocks.size()
+                    + " generated extension blocks.");
         }
         return PlacementAttemptResult.PLACED;
     }
@@ -4965,27 +4951,38 @@ public final class BreachedStructurePlacementManager {
                 || state.isOf(Blocks.DEEPSLATE_DIAMOND_ORE);
     }
 
-    private static void applySanctuaryAccessFeatures(
+    private static List<BlockPos> applySanctuaryAccessFeatures(
             ServerWorld world,
             BreachedStructureDefinition definition,
             BreachedStructurePlacement placement
     ) {
         if (!isSanctuaryStructure(definition)) {
-            return;
+            return List.of();
         }
 
-        int fallShaftBlocks = carveSanctuaryFallShaft(world, placement);
+        List<BlockPos> protectedExtensionBlocks = new ArrayList<>();
+        SanctuaryAccessFeatureResult fallShaft = carveSanctuaryFallShaft(world, placement);
+        protectedExtensionBlocks.addAll(fallShaft.protectedBlocks());
         int bubbleColumns = 0;
-        bubbleColumns += extendSanctuaryCornerBubbleColumn(world, placement, false, false);
-        bubbleColumns += extendSanctuaryCornerBubbleColumn(world, placement, true, false);
-        bubbleColumns += extendSanctuaryCornerBubbleColumn(world, placement, false, true);
-        bubbleColumns += extendSanctuaryCornerBubbleColumn(world, placement, true, true);
+        SanctuaryAccessFeatureResult northwestColumn = extendSanctuaryCornerBubbleColumn(world, placement, false, false);
+        SanctuaryAccessFeatureResult northeastColumn = extendSanctuaryCornerBubbleColumn(world, placement, true, false);
+        SanctuaryAccessFeatureResult southwestColumn = extendSanctuaryCornerBubbleColumn(world, placement, false, true);
+        SanctuaryAccessFeatureResult southeastColumn = extendSanctuaryCornerBubbleColumn(world, placement, true, true);
+        bubbleColumns += northwestColumn.bubbleColumns();
+        bubbleColumns += northeastColumn.bubbleColumns();
+        bubbleColumns += southwestColumn.bubbleColumns();
+        bubbleColumns += southeastColumn.bubbleColumns();
+        protectedExtensionBlocks.addAll(northwestColumn.protectedBlocks());
+        protectedExtensionBlocks.addAll(northeastColumn.protectedBlocks());
+        protectedExtensionBlocks.addAll(southwestColumn.protectedBlocks());
+        protectedExtensionBlocks.addAll(southeastColumn.protectedBlocks());
 
         System.out.println("[Breached] Added Sanctuary access features: cleared "
-                + fallShaftBlocks
+                + fallShaft.clearedBlocks()
                 + " fall-shaft blocks and extended "
                 + bubbleColumns
                 + " bubble columns to the surface.");
+        return protectedExtensionBlocks;
     }
 
     private static void restoreSanctuaryPitcherCrops(
@@ -5047,8 +5044,9 @@ public final class BreachedStructurePlacementManager {
         return 0;
     }
 
-    private static int carveSanctuaryFallShaft(ServerWorld world, BreachedStructurePlacement placement) {
+    private static SanctuaryAccessFeatureResult carveSanctuaryFallShaft(ServerWorld world, BreachedStructurePlacement placement) {
         BlockPos poolCenter = findSanctuaryCenterPool(world, placement);
+        List<BlockPos> protectedExtensionBlocks = new ArrayList<>();
         int startY = Math.max(world.getBottomY(), poolCenter.getY() + 1);
         int structureTopY = getSanctuaryStructureTopY(placement);
         int surfaceClearedBlocks = clearSanctuarySurfaceVegetation(
@@ -5068,6 +5066,7 @@ public final class BreachedStructurePlacementManager {
             for (int xOffset = -SANCTUARY_FALL_SHAFT_RADIUS; xOffset <= SANCTUARY_FALL_SHAFT_RADIUS; xOffset++) {
                 for (int zOffset = -SANCTUARY_FALL_SHAFT_RADIUS; zOffset <= SANCTUARY_FALL_SHAFT_RADIUS; zOffset++) {
                     BlockPos pos = new BlockPos(poolCenter.getX() + xOffset, y, poolCenter.getZ() + zOffset);
+                    protectedExtensionBlocks.add(pos.toImmutable());
                     if (!world.getBlockState(pos).isAir()) {
                         world.setBlockState(pos, Blocks.AIR.getDefaultState(), REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
                         clearedBlocks++;
@@ -5078,7 +5077,7 @@ public final class BreachedStructurePlacementManager {
 
         int sleeveStartY = Math.max(structureTopY, startY);
         int sleeveTopY = surfaceY - 1;
-        int sleeveBlocks = sleeveStartY <= sleeveTopY
+        List<BlockPos> sleeveBlocks = sleeveStartY <= sleeveTopY
                 ? placeSanctuaryAccessSleeve(
                         world,
                         poolCenter.getX(),
@@ -5087,17 +5086,60 @@ public final class BreachedStructurePlacementManager {
                         sleeveTopY,
                         SANCTUARY_FALL_SHAFT_RADIUS
                 )
-                : 0;
+                : List.of();
+        protectedExtensionBlocks.addAll(sleeveBlocks);
         int exitBlocks = clearSanctuarySurfaceExit(world, poolCenter.getX(), poolCenter.getZ(), surfaceY, SANCTUARY_FALL_SHAFT_RADIUS);
-        return surfaceClearedBlocks + clearedBlocks + sleeveBlocks + exitBlocks;
+        return new SanctuaryAccessFeatureResult(
+                surfaceClearedBlocks + clearedBlocks + sleeveBlocks.size() + exitBlocks,
+                0,
+                protectedExtensionBlocks
+        );
     }
 
     private static BlockPos findSanctuaryCenterPool(ServerWorld world, BreachedStructurePlacement placement) {
-        int centerX = placement.origin().getX() + Math.max(1, placement.size().getX()) / 2;
-        int centerZ = placement.origin().getZ() + Math.max(1, placement.size().getZ()) / 2;
-        int searchRadius = Math.max(4, Math.min(16, Math.min(placement.size().getX(), placement.size().getZ()) / 4));
-        int minY = Math.max(world.getBottomY(), placement.origin().getY());
-        int maxY = Math.min(world.getTopYInclusive(), placement.origin().getY() + Math.max(1, placement.size().getY()) - 1);
+        return findSanctuaryCenterPool(
+                world,
+                placement.origin().getX(),
+                placement.origin().getY(),
+                placement.origin().getZ(),
+                placement.size().getX(),
+                placement.size().getY(),
+                placement.size().getZ()
+        );
+    }
+
+    private static BlockPos findSanctuaryCenterPool(
+            ServerWorld world,
+            BreachedStructurePlacementState.SavedPlacement placement
+    ) {
+        return findSanctuaryCenterPool(
+                world,
+                placement.originX(),
+                placement.originY(),
+                placement.originZ(),
+                placement.sizeX(),
+                placement.sizeY(),
+                placement.sizeZ()
+        );
+    }
+
+    private static BlockPos findSanctuaryCenterPool(
+            ServerWorld world,
+            int originX,
+            int originY,
+            int originZ,
+            int sizeX,
+            int sizeY,
+            int sizeZ
+    ) {
+        int safeSizeX = Math.max(1, sizeX);
+        int safeSizeY = Math.max(1, sizeY);
+        int safeSizeZ = Math.max(1, sizeZ);
+        int centerX = originX + safeSizeX / 2;
+        int centerZ = originZ + safeSizeZ / 2;
+        int searchRadius = Math.max(4, Math.min(16, Math.min(safeSizeX, safeSizeZ) / 4));
+        int minY = Math.max(world.getBottomY(), originY);
+        int maxY = Math.min(world.getTopYInclusive(), originY + safeSizeY - 1);
 
         BlockPos bestPos = null;
         int bestWaterBlocks = 0;
@@ -5129,7 +5171,7 @@ public final class BreachedStructurePlacementManager {
             return bestPos;
         }
 
-        return new BlockPos(centerX, placement.origin().getY(), centerZ);
+        return new BlockPos(centerX, originY, centerZ);
     }
 
     private static int countSanctuaryWaterBlocks(ServerWorld world, int centerX, int y, int centerZ, int radius) {
@@ -5145,7 +5187,7 @@ public final class BreachedStructurePlacementManager {
         return waterBlocks;
     }
 
-    private static int extendSanctuaryCornerBubbleColumn(
+    private static SanctuaryAccessFeatureResult extendSanctuaryCornerBubbleColumn(
             ServerWorld world,
             BreachedStructurePlacement placement,
             boolean east,
@@ -5168,12 +5210,15 @@ public final class BreachedStructurePlacementManager {
         );
         int columnTopY = surfaceY - 1;
         if (columnStartY > columnTopY) {
-            return 0;
+            return SanctuaryAccessFeatureResult.empty();
         }
 
+        List<BlockPos> protectedExtensionBlocks = new ArrayList<>();
         BlockState upwardBubbleColumn = Blocks.BUBBLE_COLUMN.getDefaultState().with(BubbleColumnBlock.DRAG, false);
         for (int y = columnStartY; y <= columnTopY; y++) {
-            world.setBlockState(new BlockPos(columnStart.getX(), y, columnStart.getZ()), upwardBubbleColumn, REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
+            BlockPos pos = new BlockPos(columnStart.getX(), y, columnStart.getZ());
+            world.setBlockState(pos, upwardBubbleColumn, REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
+            protectedExtensionBlocks.add(pos.toImmutable());
         }
 
         int exitTopY = Math.min(world.getTopYInclusive(), surfaceY + SANCTUARY_SURFACE_EXIT_CLEARANCE);
@@ -5181,14 +5226,14 @@ public final class BreachedStructurePlacementManager {
             world.setBlockState(new BlockPos(columnStart.getX(), y, columnStart.getZ()), Blocks.AIR.getDefaultState(), REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
         }
         if (columnStartY <= columnTopY) {
-            placeSanctuaryAccessSleeve(world, columnStart.getX(), columnStart.getZ(), columnStartY, columnTopY, 0);
+            protectedExtensionBlocks.addAll(placeSanctuaryAccessSleeve(world, columnStart.getX(), columnStart.getZ(), columnStartY, columnTopY, 0));
         }
         clearSanctuarySurfaceExit(world, columnStart.getX(), columnStart.getZ(), surfaceY, 0);
 
-        return 1;
+        return new SanctuaryAccessFeatureResult(0, 1, protectedExtensionBlocks);
     }
 
-    private static int placeSanctuaryAccessSleeve(
+    private static List<BlockPos> placeSanctuaryAccessSleeve(
             ServerWorld world,
             int centerX,
             int centerZ,
@@ -5197,7 +5242,7 @@ public final class BreachedStructurePlacementManager {
             int shaftRadius
     ) {
         int sleeveRadius = shaftRadius + 1;
-        int placedBlocks = 0;
+        List<BlockPos> placedBlocks = new ArrayList<>();
 
         for (int y = Math.max(world.getBottomY(), minY); y <= Math.min(world.getTopYInclusive(), maxY); y++) {
             for (int xOffset = -sleeveRadius; xOffset <= sleeveRadius; xOffset++) {
@@ -5209,7 +5254,7 @@ public final class BreachedStructurePlacementManager {
                     BlockPos pos = new BlockPos(centerX + xOffset, y, centerZ + zOffset);
                     if (canReplaceWithSanctuaryAccessBrick(world, pos)) {
                         world.setBlockState(pos, Blocks.DEEPSLATE_BRICKS.getDefaultState(), REMOVE_BLOCK_WITHOUT_DROPS_FLAGS);
-                        placedBlocks++;
+                        placedBlocks.add(pos.toImmutable());
                     }
                 }
             }
@@ -5590,6 +5635,10 @@ public final class BreachedStructurePlacementManager {
 
     private static void registerProtectionEvents() {
         PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) -> {
+            if (state.isOf(Blocks.SNOW)) {
+                return true;
+            }
+
             if (shouldProtect(world, player, pos)) {
                 player.sendMessage(Text.literal("Protected Breached structures cannot be modified."), false);
                 return false;
@@ -5705,32 +5754,7 @@ public final class BreachedStructurePlacementManager {
                 continue;
             }
 
-            if (isExactProtectedStructure(definition.get())) {
-                if (isInsideExactProtectedStructure(serverWorld, definition.get(), placement.getValue(), pos)) {
-                    return true;
-                }
-                continue;
-            }
-
-            if (isVolumeProtectedStructure(definition.get())) {
-                if (isInsidePlacementBounds(placement.getValue(), pos)) {
-                    return true;
-                }
-                continue;
-            }
-
-            if (isSanctuaryStructure(definition.get())
-                    && isInsideSanctuaryAccessProtection(serverWorld, placement.getValue(), pos, SANCTUARY_ACCESS_PROTECTION_MARGIN)) {
-                return true;
-            }
-
-            if (BreachedStructureSpawnManager.isInsideProtectionRadius(
-                    definition.get(),
-                    placement.getValue().centerX(),
-                    getProtectedCenterY(placement.getValue(), pos),
-                    placement.getValue().centerZ(),
-                    pos
-            )) {
+            if (isProtectedStructurePosition(serverWorld, definition.get(), placement.getValue(), pos)) {
                 return true;
             }
         }
@@ -5756,9 +5780,10 @@ public final class BreachedStructurePlacementManager {
                 continue;
             }
 
-            if (isCuboidLandlockExclusion(definition.get(), placement.getValue(), pos)
-                    || isRadiusLandlockExclusion(definition.get(), placement.getValue(), pos)
-                    || isSanctuaryAccessLandlockExclusion(serverWorld, definition.get(), placement.getValue(), pos)) {
+            int exclusionMargin = MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN
+                    + getProtectedStructureCuboidMargin(definition.get());
+            if (isInsideExpandedPlacementBounds(placement.getValue(), pos, exclusionMargin)
+                    || isNearProtectedExtensionBlock(placement.getValue(), pos, MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN)) {
                 return true;
             }
         }
@@ -5780,108 +5805,12 @@ public final class BreachedStructurePlacementManager {
                 continue;
             }
 
-            if (isExactProtectedStructure(definition.get())) {
-                if (isInsidePlacementBounds(placement.getValue(), pos)) {
-                    return true;
-                }
-                continue;
-            }
-
-            if (isVolumeProtectedStructure(definition.get())) {
-                if (isInsidePlacementBounds(placement.getValue(), pos)) {
-                    return true;
-                }
-                continue;
-            }
-
-            if (isSanctuaryStructure(definition.get())
-                    && isInsideSanctuaryAccessProtection(serverWorld, placement.getValue(), pos, SANCTUARY_ACCESS_PROTECTION_MARGIN)) {
-                return true;
-            }
-
-            if (BreachedStructureSpawnManager.isInsideProtectionRadius(
-                    definition.get(),
-                    placement.getValue().centerX(),
-                    getProtectedCenterY(placement.getValue(), pos),
-                    placement.getValue().centerZ(),
-                    pos
-            )) {
+            if (isProtectedStructurePosition(serverWorld, definition.get(), placement.getValue(), pos)) {
                 return true;
             }
         }
 
         return false;
-    }
-
-    private static boolean isCuboidLandlockExclusion(
-            BreachedStructureDefinition definition,
-            BreachedStructurePlacementState.SavedPlacement placement,
-            BlockPos pos
-    ) {
-        if (!isExactProtectedStructure(definition) && !isVolumeProtectedStructure(definition)) {
-            return false;
-        }
-
-        return isInsideExpandedPlacementBounds(placement, pos, MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN);
-    }
-
-    private static boolean isRadiusLandlockExclusion(
-            BreachedStructureDefinition definition,
-            BreachedStructurePlacementState.SavedPlacement placement,
-            BlockPos pos
-    ) {
-        if (!definition.protectedStructure() || definition.protectionRadius() <= 0) {
-            return false;
-        }
-
-        int expandedRadius = definition.protectionRadius() + MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN;
-        long xDistance = pos.getX() - placement.centerX();
-        long yDistance = pos.getY() - getProtectedCenterY(placement, pos);
-        long zDistance = pos.getZ() - placement.centerZ();
-        return xDistance * xDistance + yDistance * yDistance + zDistance * zDistance <= (long) expandedRadius * expandedRadius;
-    }
-
-    private static boolean isSanctuaryAccessLandlockExclusion(
-            ServerWorld world,
-            BreachedStructureDefinition definition,
-            BreachedStructurePlacementState.SavedPlacement placement,
-            BlockPos pos
-    ) {
-        return isSanctuaryStructure(definition)
-                && isInsideSanctuaryAccessProtection(
-                        world,
-                        placement,
-                        pos,
-                        SANCTUARY_ACCESS_PROTECTION_MARGIN + MAJOR_STRUCTURE_LANDLOCK_EXCLUSION_MARGIN
-                );
-    }
-
-    private static boolean isExactProtectedStructure(BreachedStructureDefinition definition) {
-        return false;
-    }
-
-    private static boolean isVolumeProtectedStructure(BreachedStructureDefinition definition) {
-        String structureKey = BreachedStructureDefinitions.key(definition);
-        return structureKey.equals(END_PORTAL_STRUCTURE_KEY) || structureKey.equals(EYEBALL_STRUCTURE_KEY);
-    }
-
-    private static boolean isInsideExactProtectedStructure(
-            ServerWorld world,
-            BreachedStructureDefinition definition,
-            BreachedStructurePlacementState.SavedPlacement placement,
-            BlockPos pos
-    ) {
-        if (!isInsidePlacementBounds(placement, pos)) {
-            return false;
-        }
-
-        Set<BlockPos> protectedBlocks = getExactProtectionBlocks(world, definition);
-        BlockPos relativePos = new BlockPos(
-                pos.getX() - placement.originX(),
-                pos.getY() - placement.originY(),
-                pos.getZ() - placement.originZ()
-        );
-        return protectedBlocks.contains(relativePos);
     }
 
     private static boolean isInsidePlacementBounds(
@@ -5918,88 +5847,202 @@ public final class BreachedStructurePlacementManager {
                 && pos.getZ() < placement.originZ() + placement.sizeZ() + expandedMargin;
     }
 
-    private static boolean isInsideSanctuaryAccessProtection(
+    private static boolean isProtectedStructurePosition(
             ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        return isInsideExpandedPlacementBounds(placement, pos, getProtectedStructureCuboidMargin(definition))
+                || placement.protectedExtensionBlocks().contains(pos)
+                || isRecognizedLegacyExtensionBlock(world, definition, placement, pos);
+    }
+
+    private static int getProtectedStructureCuboidMargin(BreachedStructureDefinition definition) {
+        String structureKey = BreachedStructureDefinitions.key(definition);
+        if (structureKey.equals(EYEBALL_STRUCTURE_KEY)
+                || structureKey.equals(END_PORTAL_STRUCTURE_KEY)
+                || structureKey.equals(SANCTUARY_STRUCTURE_KEY)) {
+            return 0;
+        }
+
+        return PROTECTED_STRUCTURE_CUBOID_MARGIN;
+    }
+
+    private static boolean isNearProtectedExtensionBlock(
             BreachedStructurePlacementState.SavedPlacement placement,
             BlockPos pos,
             int margin
     ) {
-        if (placement.sizeX() <= 0 || placement.sizeY() <= 0 || placement.sizeZ() <= 0) {
-            return false;
-        }
-
         int expandedMargin = Math.max(0, margin);
-        if (pos.getX() < placement.originX() - expandedMargin
-                || pos.getX() >= placement.originX() + placement.sizeX() + expandedMargin
-                || pos.getZ() < placement.originZ() - expandedMargin
-                || pos.getZ() >= placement.originZ() + placement.sizeZ() + expandedMargin) {
-            return false;
-        }
-
-        int minY = Math.max(world.getBottomY(), placement.originY() - expandedMargin);
-        int maxY = Math.min(
-                world.getTopYInclusive(),
-                getSanctuaryAccessProtectionTopY(world, pos.getX(), pos.getZ()) + expandedMargin
-        );
-        return pos.getY() >= minY && pos.getY() <= maxY;
-    }
-
-    private static int getSanctuaryAccessProtectionTopY(ServerWorld world, int x, int z) {
-        int surfaceY = world.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, x, z);
-        while (surfaceY > world.getBottomY() + 1
-                && isSanctuarySurfaceVegetation(world.getBlockState(new BlockPos(x, surfaceY - 1, z)))) {
-            surfaceY--;
-        }
-
-        return Math.min(world.getTopYInclusive(), surfaceY + SANCTUARY_ACCESS_PROTECTION_SURFACE_PADDING);
-    }
-
-    private static int getProtectedCenterY(BreachedStructurePlacementState.SavedPlacement placement, BlockPos pos) {
-        if (placement.sizeY() <= 0) {
-            return pos.getY();
-        }
-
-        return getPlacementCenterY(placement);
-    }
-
-    private static int getPlacementCenterY(BreachedStructurePlacementState.SavedPlacement placement) {
-        if (placement.sizeY() <= 0) {
-            return placement.originY();
-        }
-
-        return placement.originY() + placement.sizeY() / 2;
-    }
-
-    private static Set<BlockPos> getExactProtectionBlocks(ServerWorld world, BreachedStructureDefinition definition) {
-        String structureKey = BreachedStructureDefinitions.key(definition);
-        Set<BlockPos> cachedBlocks = EXACT_PROTECTION_BLOCKS.get(structureKey);
-        if (cachedBlocks != null) {
-            return cachedBlocks;
-        }
-
-        Optional<StructureTemplate> template = BreachedStructureSpawnManager.loadTemplate(world, definition);
-        if (template.isEmpty()) {
-            EXACT_PROTECTION_BLOCKS.put(structureKey, Set.of());
-            return Set.of();
-        }
-
-        Set<BlockPos> protectedBlocks = new HashSet<>();
-        for (BreachedStructureSpawnManager.TemplatePlacedBlock block : BreachedStructureSpawnManager.getTemplatePlacedBlocks(
-                world,
-                definition,
-                template.get(),
-                BlockPos.ORIGIN,
-                definition.mirror(),
-                definition.rotation()
-        )) {
-            if (!block.state().isAir()) {
-                protectedBlocks.add(block.pos().toImmutable());
+        for (BlockPos extensionBlock : placement.protectedExtensionBlocks()) {
+            if (Math.abs(pos.getX() - extensionBlock.getX()) <= expandedMargin
+                    && Math.abs(pos.getY() - extensionBlock.getY()) <= expandedMargin
+                    && Math.abs(pos.getZ() - extensionBlock.getZ()) <= expandedMargin) {
+                return true;
             }
         }
 
-        Set<BlockPos> immutableBlocks = Set.copyOf(protectedBlocks);
-        EXACT_PROTECTION_BLOCKS.put(structureKey, immutableBlocks);
-        return immutableBlocks;
+        return false;
+    }
+
+    private static boolean isRecognizedLegacyExtensionBlock(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        if (isInsideExpandedPlacementBounds(placement, pos, getProtectedStructureCuboidMargin(definition))) {
+            return false;
+        }
+
+        return isRecognizedLegacySupportBlock(world, definition, placement, pos)
+                || isRecognizedLegacySanctuaryAccessBlock(world, definition, placement, pos)
+                || isRecognizedLegacyTownhallExtensionBlock(world, definition, placement, pos);
+    }
+
+    private static boolean isRecognizedLegacySupportBlock(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        if (definition.supportMode() == BreachedStructureDefinition.SupportMode.NONE
+                || definition.supportBlock().equals(Blocks.AIR)
+                || definition.supportMaxDepth() <= 0
+                || !world.getBlockState(pos).isOf(definition.supportBlock())) {
+            return false;
+        }
+
+        return pos.getX() >= placement.originX()
+                && pos.getX() < placement.originX() + placement.sizeX()
+                && pos.getZ() >= placement.originZ()
+                && pos.getZ() < placement.originZ() + placement.sizeZ()
+                && pos.getY() < placement.originY()
+                && pos.getY() >= placement.originY() - definition.supportMaxDepth();
+    }
+
+    private static boolean isRecognizedLegacySanctuaryAccessBlock(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        if (!isSanctuaryStructure(definition)
+                || placement.sizeX() <= 0
+                || placement.sizeY() <= 0
+                || placement.sizeZ() <= 0
+                || pos.getY() < placement.originY() + placement.sizeY()
+                || pos.getX() < placement.originX() - 1
+                || pos.getX() >= placement.originX() + placement.sizeX() + 1
+                || pos.getZ() < placement.originZ() - 1
+                || pos.getZ() >= placement.originZ() + placement.sizeZ() + 1) {
+            return false;
+        }
+
+        BlockState state = world.getBlockState(pos);
+        return state.isOf(Blocks.BUBBLE_COLUMN)
+                || state.isOf(Blocks.DEEPSLATE_BRICKS)
+                || isRecognizedLegacySanctuaryFallShaftAir(world, placement, pos, state);
+    }
+
+    private static boolean isRecognizedLegacySanctuaryFallShaftAir(
+            ServerWorld world,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos,
+            BlockState state
+    ) {
+        if (!state.isAir()) {
+            return false;
+        }
+
+        BlockPos poolCenter = findSanctuaryCenterPool(world, placement);
+        if (Math.abs(pos.getX() - poolCenter.getX()) > SANCTUARY_FALL_SHAFT_RADIUS
+                || Math.abs(pos.getZ() - poolCenter.getZ()) > SANCTUARY_FALL_SHAFT_RADIUS) {
+            return false;
+        }
+
+        int startY = Math.max(world.getBottomY(), poolCenter.getY() + 1);
+        int surfaceY = Math.min(
+                world.getTopYInclusive(),
+                getMaxSurfaceYForArea(
+                        world,
+                        poolCenter.getX(),
+                        poolCenter.getZ(),
+                        getSanctuarySurfaceClearRadius(SANCTUARY_FALL_SHAFT_RADIUS)
+                )
+        );
+        return pos.getY() >= startY && pos.getY() <= surfaceY;
+    }
+
+    private static boolean isRecognizedLegacyTownhallExtensionBlock(
+            ServerWorld world,
+            BreachedStructureDefinition definition,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos
+    ) {
+        if (!isTownhallStructure(definition)) {
+            return false;
+        }
+
+        BlockState state = world.getBlockState(pos);
+        return isRecognizedLegacyTownhallStair(world, placement, pos, state)
+                || isRecognizedLegacyTownhallWaterLanding(world, placement, pos, state);
+    }
+
+    private static boolean isRecognizedLegacyTownhallStair(
+            ServerWorld world,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos,
+            BlockState state
+    ) {
+        if (!state.isOf(Blocks.QUARTZ_STAIRS) || !state.contains(Properties.HORIZONTAL_FACING)) {
+            return false;
+        }
+
+        Direction ascentDirection = state.get(Properties.HORIZONTAL_FACING);
+        BlockPos cursor = pos;
+        for (int step = 0; step < TOWNHALL_LEGACY_STAIR_EXTENSION_SEARCH_STEPS; step++) {
+            BlockPos previous = cursor.offset(ascentDirection).up();
+            if (isInsidePlacementBounds(placement, previous)
+                    || isInsideExpandedPlacementBounds(placement, previous, PROTECTED_STRUCTURE_CUBOID_MARGIN)) {
+                return true;
+            }
+
+            BlockState previousState = world.getBlockState(previous);
+            if (!previousState.isOf(Blocks.QUARTZ_STAIRS)
+                    || !previousState.contains(Properties.HORIZONTAL_FACING)
+                    || previousState.get(Properties.HORIZONTAL_FACING) != ascentDirection) {
+                return false;
+            }
+
+            cursor = previous;
+        }
+
+        return false;
+    }
+
+    private static boolean isRecognizedLegacyTownhallWaterLanding(
+            ServerWorld world,
+            BreachedStructurePlacementState.SavedPlacement placement,
+            BlockPos pos,
+            BlockState state
+    ) {
+        if (!state.isOf(Blocks.QUARTZ_BLOCK)) {
+            return false;
+        }
+
+        for (Direction direction : Direction.Type.HORIZONTAL) {
+            for (int offset = 0; offset < 3; offset++) {
+                BlockPos stairPos = pos.offset(direction.getOpposite(), offset + 1).up();
+                BlockState stairState = world.getBlockState(stairPos);
+                if (isRecognizedLegacyTownhallStair(world, placement, stairPos, stairState)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static Optional<BreachedStructureDefinition> getProtectedDefinition(String key) {
@@ -6211,6 +6254,20 @@ public final class BreachedStructurePlacementManager {
             boolean portalRestocked
     ) {
         private static final PortalRestockResult NONE = new PortalRestockResult(0, 0, false);
+    }
+
+    private record SanctuaryAccessFeatureResult(
+            int clearedBlocks,
+            int bubbleColumns,
+            List<BlockPos> protectedBlocks
+    ) {
+        private SanctuaryAccessFeatureResult {
+            protectedBlocks = List.copyOf(protectedBlocks);
+        }
+
+        private static SanctuaryAccessFeatureResult empty() {
+            return new SanctuaryAccessFeatureResult(0, 0, List.of());
+        }
     }
 
     private record MinorPoiBlockEvaluation(
